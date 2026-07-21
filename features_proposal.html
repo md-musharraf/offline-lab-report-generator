@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JharLab LIS - Feature Proposal</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+    :root {
+      --primary: #0f766e; /* Deep Teal */
+      --primary-light: #ccfbf1;
+      --secondary: #1e3a8a; /* Royal Blue */
+      --secondary-light: #dbeafe;
+      --dark: #0f172a; /* Slate 900 */
+      --light: #f8fafc; /* Slate 50 */
+      --muted: #475569; /* Slate 600 */
+      --border: #e2e8f0; /* Slate 200 */
+      --accent: #d97706; /* Amber 600 */
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: var(--dark);
+      background-color: #ffffff;
+      line-height: 1.6;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    h1, h2, h3, h4 {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      color: var(--secondary);
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 20mm;
+      margin: 0 auto;
+      background: #white;
+      position: relative;
+    }
+
+    /* Print page-break settings */
+    @media print {
+      body {
+        background: #ffffff;
+      }
+      .page {
+        width: 100%;
+        min-height: 100%;
+        padding: 10mm 15mm;
+        margin: 0;
+        page-break-after: always;
+      }
+      .no-print {
+        display: none;
+      }
+    }
+
+    /* Cover Styling */
+    .header-band {
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: white;
+      padding: 30px;
+      border-radius: 16px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 20px rgba(15, 118, 110, 0.15);
+    }
+
+    .header-band h1 {
+      color: #ffffff;
+      font-size: 32px;
+      margin-bottom: 8px;
+      font-weight: 800;
+    }
+
+    .header-band p {
+      font-size: 16px;
+      opacity: 0.9;
+    }
+
+    .subtitle {
+      color: var(--accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .section-title {
+      font-size: 22px;
+      margin-top: 20px;
+      margin-bottom: 15px;
+      border-bottom: 2px solid var(--primary-light);
+      padding-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-title span {
+      background-color: var(--primary);
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .intro-box {
+      background-color: var(--light);
+      border-left: 4px solid var(--primary);
+      padding: 15px 20px;
+      border-radius: 0 12px 12px 0;
+      margin-bottom: 25px;
+    }
+
+    .intro-box p {
+      font-size: 14px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* Grid Layout for Features */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .feature-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 15px 18px;
+      background-color: #ffffff;
+      transition: all 0.2s ease;
+      page-break-inside: avoid;
+    }
+
+    .feature-card h3 {
+      font-size: 16px;
+      color: var(--primary);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feature-card h3 svg {
+      width: 18px;
+      height: 18px;
+      fill: var(--primary);
+    }
+
+    .feature-card p {
+      font-size: 13.5px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .feature-badge-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+      background-color: var(--light);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    .badge.highlight {
+      background-color: var(--primary-light);
+      color: var(--primary);
+      border-color: transparent;
+    }
+
+    /* Table Styling */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 13px;
+      page-break-inside: avoid;
+    }
+
+    th {
+      background-color: var(--secondary);
+      color: white;
+      text-align: left;
+      padding: 10px 12px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:nth-child(even) td {
+      background-color: var(--light);
+    }
+
+    .footer {
+      margin-top: 30px;
+      border-top: 1px solid var(--border);
+      padding-top: 15px;
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .page-break-indicator {
+      page-break-after: always;
+    }
+
+    .benefit-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .benefit-icon {
+      color: var(--primary);
+      font-weight: bold;
+      font-size: 16px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- PAGE 1 -->
+  <div class="page">
+    <div class="header-band">
+      <div class="subtitle">Laboratory Information System (LIS)</div>
+      <h1>JharLab Pathology Software</h1>
+      <p>Premium & Intelligent Offline Software for Diagnostic Labs (NABL Standards Compliance)</p>
+    </div>
+
+    <div class="intro-box">
+      <p>
+        <strong>Namaste!</strong> Agar aap apne pathology lab client ko yeh software introduce kar rahe hain, toh unhe asaan aur clear Hinglish language mein features samjhana zaroori hai. Yeh list unko software ki utility, speed, aur business value samajhne mein madad karegi.
+      </p>
+    </div>
+
+    <div class="section-title"><span>1</span> Core Operations & Patient Experience</div>
+    
+    <div class="feature-grid">
+      
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+          Quick Patient Registration & Smart ID System
+        </h3>
+        <p>Patient ki registration details add karna bohot aasan hai. Mobile number, age, gender aur billing parameters enter karte hi system automatically unique Patient Lab ID aur barcode/QR format generate kar deta hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Unique Patient ID</span>
+          <span class="badge">Emergency Marking</span>
+          <span class="badge">History Tracking</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+          Sleek Billing & GST Invoice Management
+        </h3>
+        <p>Billing screen par automatic Subtotal, Flat/Percentage Discount aur CGST/SGST calculations hoti hain. Multi-payment system hai (Cash, Card, UPI, etc.) aur payment status (Paid, Unpaid, Due) track karna bohot simple hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">GST Calculator</span>
+          <span class="badge">Multi-payment Modes</span>
+          <span class="badge">Invoice Print</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2z"/></svg>
+          Auto-Formula Calculation (Calculated Parameters)
+        </h3>
+        <p>Kuch test results system khud calculate kar leta hai. Jaise jab technician Total Protein aur Albumin ki values daalega, toh Globulin (= Protein - Albumin) aur A/G Ratio automatically software generate kar dega bina kisi manually typing ke.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Time Saving</span>
+          <span class="badge">Zero Math Errors</span>
+          <span class="badge">Lipid & Kidney Profiles</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+          Smart Reference Ranges & Critical Flag Warnings
+        </h3>
+        <p>Umar (Age) aur Gender (Male/Female/Other) ke base par normal ranges automatically print hoti hain. Agar patient ka result normal se bohot upar ya neeche hai, toh alert flags (↑ high, ↓ low, !! critical) dynamic display hote hain.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">NABL Standards</span>
+          <span class="badge">Auto Flags</span>
+          <span class="badge">Age/Gender Filter</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <span>JharLab Laboratory Information System - Feature Guide</span>
+      <span>Page 1 of 3</span>
+    </div>
+  </div>
+
+  <div class="page-break-indicator"></div>
+
+  <!-- PAGE 2 -->
+  <div class="page">
+    <div class="section-title"><span>2</span> Automation & Machine Interfacing (LIS Interfacing)</div>
+    
+    <div class="intro-box">
+      <p>
+        JharLab ki sabse badi taaqat hai iska <strong>Machine Interfacing Engine</strong>. Lab me moujood automated machinery ko software ke sath direct jodkar system ko auto-pilot par chalaya ja sakta hai.
+      </p>
+    </div>
+
+    <div class="feature-grid">
+      
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+          Bi-Directional Machine Communication (LAN & COM Ports)
+        </h3>
+        <p>Sysmex, Mindray, ya kisi bhi biochemistry aur hematology analyzers ko LAN net port ya Serial (COM) port se direct integrate kar sakte hain. Bi-directional communication se machine LIS software se test order automatic read kar leti hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">TCP/IP Server & Client</span>
+          <span class="badge">ASTM & HL7 Support</span>
+          <span class="badge">COM Port Listener</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          Auto-Validation & Result Reconciliation
+        </h3>
+        <p>Jab machine sample scan karti hai aur reports ready karti hai, toh LIS result data automatically capture kar ke database me store kar deta hai. Agar koi report unmatched (Orphan) hai, toh use manual reconcile karne ki screen di gayi hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Zero Data Loss</span>
+          <span class="badge">Orphan Scan Reconcile</span>
+          <span class="badge">Realtime Logs</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M18 4H6v2h12V4zm0 4H6v8h12V8zm1 9H5v2h14v-2z"/></svg>
+          Daily Quality Control (QC Result Manager)
+        </h3>
+        <p>Diagnostic accuracy banaye rakhne ke liye Quality Control entries (measured value vs expected target values, standard deviations, CV) register kar sakte hain. System batata hai ki QC Status PASS hai, WARNING hai ya FAIL hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">QC Pass/Fail Logs</span>
+          <span class="badge">NABL Compliance</span>
+          <span class="badge">Calibration History</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section-title"><span>3</span> Business Suite & Operational Tools</div>
+
+    <div class="feature-grid">
+      
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          Referral Doctor Commission Ledger
+        </h3>
+        <p>Referral doctors ki poori directory manage karein. Kis doctor ne kitne patients bheje aur unka category-wise commission payout (Biochemistry 10%, Hematology 15% etc.) kitna bana, iska ek automated ledger ban jata hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Doctor Ledger</span>
+          <span class="badge">Category Commissions</span>
+          <span class="badge">Payout Tracker</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+          Reagent & Consumables Inventory Management
+        </h3>
+        <p>Chemicals, reagents, aur diagnostic kits ka real-time stock control. Minimum alerts thresholds ke saath expire dates track karein taaki important tests material ki shortage ki wajah se kabhi ruk na paayein.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Low Stock Alerts</span>
+          <span class="badge">Expiry Dates Manager</span>
+          <span class="badge">Supplier Directory</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+          Outsource Test & Expense Tracker
+        </h3>
+        <p>Jo tests aapki lab me nahi hote aur aap unhe external path labs me outsourcing ke liye bhejte hain unka cost aur status record rakhein. Reagent purchases aur daily expenses (Salary, Bill, rent) feed karke Net Profit generate karein.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Outsource Tracker</span>
+          <span class="badge">Expense Manager</span>
+          <span class="badge">Net Profit Tracker</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      <span>JharLab Laboratory Information System - Feature Guide</span>
+      <span>Page 2 of 3</span>
+    </div>
+  </div>
+
+  <div class="page-break-indicator"></div>
+
+  <!-- PAGE 3 -->
+  <div class="page">
+    <div class="section-title"><span>4</span> System Customizations & Security</div>
+    
+    <div class="feature-grid">
+      
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM8.9 6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2H8.9V6z"/></svg>
+          Strict User Roles & Audit Trail Logs
+        </h3>
+        <p>Staff roles manage karein. Receptionist, Technician, Pathologist aur Admin ke liye limited screens ka option hai. User kab login hua aur kisne kis test key value me changes kiye, yeh poora audit trail logs me save hota hai.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">RBAC (Security)</span>
+          <span class="badge">Activity Audit Trail</span>
+          <span class="badge">Anti-Tampering</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>
+          100% Offline Capability with Local SQLite DB & Auto Backups
+        </h3>
+        <p>Software poori tarah offline kaam karta hai, internet band hone par bhi lab rukegi nahi. Backups banana bohot easy hai aur automatic recovery systems integrated hain.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">No Internet Required</span>
+          <span class="badge">SQLite Engine</span>
+          <span class="badge">Automatic Backups</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          Fully Customizable Settings (Margin, Footer & Header Printing)
+        </h3>
+        <p>Agar lab pre-printed letterhead pad use karti hai, toh top margin layout ko precise inches me set kar sakte hain. Doctor aur technician digital signatures, logo, stamp aur footer instructions easily set kiye ja sakte hain.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Print Margin Settings</span>
+          <span class="badge">Digital Signature Upload</span>
+          <span class="badge">Custom Stamp & Logo</span>
+        </div>
+      </div>
+
+      <div class="feature-card">
+        <h3>
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+          Seamless Online Updates & Licensing Security
+        </h3>
+        <p>Internet connect hone par admin portal se push kiya gaya new features update one-click me download aur install ho jata hai. Cryptographic machine GUID check ke saath licenses manage hotey hain.</p>
+        <div class="feature-badge-list">
+          <span class="badge highlight">Automatic Online Updates</span>
+          <span class="badge">AES-256 License Keys</span>
+          <span class="badge">7-Day Free Trial</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section-title"><span>5</span> Technology Stack Overview</div>
+    <div style="font-size: 13px; color: var(--muted); margin-bottom: 20px;">
+      <p>JharLab LIS modern aur robust technologies se bana hai jo extreme safety aur zero lag performance maintain karti hain:</p>
+      <div style="margin-top: 10px; display: flex; gap: 20px; flex-wrap: wrap;">
+        <div class="benefit-item"><span class="benefit-icon">✔</span><strong>Frontend UI:</strong> Next.js & React (Tailwind CSS based dark/light dashboard)</div>
+        <div class="benefit-item"><span class="benefit-icon">✔</span><strong>Desktop Engine:</strong> Electron (Provides native Windows application experience)</div>
+        <div class="benefit-item"><span class="benefit-icon">✔</span><strong>Database:</strong> SQLite with Prisma ORM (High-speed relational storage, zero configuration required)</div>
+        <div class="benefit-item"><span class="benefit-icon">✔</span><strong>Automation Port:</strong> Node.js net sockets (ASTM / HL7 communication)</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>JharLab Laboratory Information System - Feature Guide</span>
+      <span>Page 3 of 3</span>
+    </div>
+  </div>
+
+</body>
+</html>

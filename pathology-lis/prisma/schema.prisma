@@ -1,0 +1,354 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model LabSettings {
+  id                Int      @id @default(autoincrement())
+  labName           String
+  address           String?
+  phone             String?
+  email             String?
+  website           String?
+  nablNo            String?
+  gstNo             String?
+  registrationNo    String?
+  logoUrl           String?
+  taxPercent        Float    @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   // SUPER_ADMIN, ADMIN, TECHNICIAN, RECEPTIONIST, DOCTOR
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ActivityLog ActivityLog[]
+}
+
+model Patient {
+  id          Int      @id @default(autoincrement())
+  patientId   String   @unique // LAB-YYYY-NNNNN
+  name        String
+  age         Int
+  ageUnit     String   @default("Y") // Y, M, D
+  gender      String   // Male, Female, Other
+  mobile      String?
+  email       String?
+  address     String?
+  corporateId Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  orders      TestOrder[]
+}
+
+model Corporate {
+  id            Int      @id @default(autoincrement())
+  name          String
+  gstin         String?
+  address       String?
+  discount      Float    @default(0)
+  creditDays    Int      @default(30)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Doctor {
+  id              Int      @id @default(autoincrement())
+  name            String
+  registrationNo  String?
+  mobile          String?
+  commissionValue Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  orders          TestOrder[]
+}
+
+model TestCategory {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique // HEM, BIO, SER
+  name      String
+  color     String?
+  tests     Test[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Test {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique // HEM001
+  name        String
+  categoryId  Int
+  category    TestCategory @relation(fields: [categoryId], references: [id])
+  price       Float
+  parameters  TestParameter[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model TestParameter {
+  id             Int      @id @default(autoincrement())
+  testId         Int
+  test           Test     @relation(fields: [testId], references: [id])
+  name           String
+  unit           String?
+  normalMin      Float?
+  normalMax      Float?
+  criticalMin    Float?
+  criticalMax    Float?
+  textNormal     String?
+  isCalculated   Boolean  @default(false)
+  formula        String?
+  type           String   // NUMERIC, TEXT, DROPDOWN
+  options        String?  // comma separated for dropdown
+  genderSpecific String?  // M, F
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model TestOrder {
+  id            Int      @id @default(autoincrement())
+  orderNo       String   @unique // LAB-ORD-YYYYMMDD-NNN
+  patientId     Int
+  patient       Patient  @relation(fields: [patientId], references: [id])
+  doctorId      Int?
+  doctor        Doctor?  @relation(fields: [doctorId], references: [id])
+  status        String   // REGISTERED, COLLECTED, PROCESSING, APPROVED, DELIVERED
+  priority      String   @default("ROUTINE") // ROUTINE, URGENT, EMERGENCY
+  collectionType String  // WALK_IN, HOME
+  isPcPndt      Boolean  @default(false)
+  pcPndtReason  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  items         TestOrderItem[]
+  billing       Billing?
+  notifications Notification[]
+}
+
+model TestOrderItem {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     TestOrder @relation(fields: [orderId], references: [id])
+  testId    Int
+  status    String   // PENDING, ENTERED, VERIFIED, APPROVED
+  price     Float
+  results   Result[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Result {
+  id             Int      @id @default(autoincrement())
+  orderItemId    Int
+  orderItem      TestOrderItem @relation(fields: [orderItemId], references: [id])
+  parameterId    Int
+  value          String?
+  isCritical     Boolean  @default(false)
+  criticalAcknowledgedBy String?
+  criticalAcknowledgedAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Billing {
+  id             Int      @id @default(autoincrement())
+  orderId        Int      @unique
+  order          TestOrder @relation(fields: [orderId], references: [id])
+  billNo         String   @unique
+  subtotal       Float
+  discount       Float    @default(0)
+  discountReason String?
+  tax            Float    @default(0)
+  total          Float
+  paidAmount     Float    @default(0)
+  dueAmount      Float    @default(0)
+  dueDate        DateTime?
+  status         String   // PAID, PARTIAL, DUE
+  payments       Payment[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  billingId Int
+  billing   Billing  @relation(fields: [billingId], references: [id])
+  amount    Float
+  method    String   // CASH, UPI, CARD, CREDIT
+  reference String?
+  createdAt DateTime @default(now())
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  module    String
+  entityId  String?
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+model QCRecord {
+  id            Int      @id @default(autoincrement())
+  testId        Int
+  parameterId   Int
+  batchNo       String?
+  controlLevel  String   // LOW | NORMAL | HIGH
+  expectedValue Float
+  measuredValue Float
+  deviation     Float
+  percentCV     Float?
+  status        String   // PASS FAIL WARNING
+  instrument    String?
+  performedBy   Int
+  performedAt   DateTime @default(now())
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model Staff {
+  id           Int      @id @default(autoincrement())
+  name         String
+  role         String
+  mobile       String?
+  email        String?
+  salary       Float?
+  joinedAt     DateTime?
+  isActive     Boolean  @default(true)
+  attendance   Attendance[]
+  homeCollections HomeCollection[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+}
+
+model HomeCollection {
+  id          Int      @id @default(autoincrement())
+  staffId     Int
+  staff       Staff    @relation(fields: [staffId], references: [id])
+  address     String
+  status      String
+  scheduledAt DateTime
+  createdAt   DateTime @default(now())
+}
+
+model Attendance {
+  id        Int      @id @default(autoincrement())
+  staffId   Int
+  staff     Staff    @relation(fields: [staffId], references: [id])
+  date      DateTime
+  status    String   // PRESENT ABSENT HALFDAY LEAVE HOLIDAY
+  inTime    String?
+  outTime   String?
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model InventoryItem {
+  id            Int      @id @default(autoincrement())
+  name          String
+  category      String   // REAGENT | TUBE | CHEMICAL | KIT | CONSUMABLE | EQUIPMENT
+  unit          String
+  currentStock  Float
+  minStock      Float
+  maxStock      Float?
+  expiryDate    DateTime?
+  supplierId    Int?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  batchNumber   String?
+  purchasePrice Float?
+  sellingPrice  Float?
+  isActive      Boolean  @default(true)
+  alertSent     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  transactions  InventoryTransaction[]
+}
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  mobile    String?
+  email     String?
+  address   String?
+  gst       String?
+  items     InventoryItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InventoryTransaction {
+  id         Int      @id @default(autoincrement())
+  itemId     Int
+  item       InventoryItem @relation(fields: [itemId], references: [id])
+  type       String   // IN OUT ADJUST EXPIRED RETURN
+  quantity   Float
+  unitPrice  Float?
+  totalPrice Float?
+  note       String?
+  invoice    String?
+  createdAt  DateTime @default(now())
+  createdBy  Int
+}
+
+model Expenditure {
+  id          Int      @id @default(autoincrement())
+  category    String   // SALARY | REAGENT | RENT | EQUIPMENT | MISC
+  description String
+  amount      Float
+  paidTo      String?
+  paymentMethod String @default("CASH")
+  reference   String?
+  expenseDate DateTime
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  orderId     Int?
+  order       TestOrder? @relation(fields: [orderId], references: [id])
+  type        String   // REGISTRATION SAMPLE_COLLECTED REPORT_READY CRITICAL_ALERT PAYMENT_DUE CUSTOM
+  recipient   String   // mobile or email
+  channel     String   // SMS | WHATSAPP | EMAIL
+  message     String
+  status      String   @default("PENDING") // PENDING SENT FAILED QUEUED
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+}
+
+model BackupLog {
+  id         Int      @id @default(autoincrement())
+  filename   String
+  sizeBytes  Int
+  type       String   // MANUAL AUTO SCHEDULED CLOUD
+  status     String
+  path       String?
+  createdAt  DateTime @default(now())
+  createdBy  Int
+}
+
+model License {
+  id         Int      @id @default(autoincrement())
+  machineId  String
+  expiryDate String
+  licenseKey String
+  status     String   @default("ACTIVE") // ACTIVE, PAUSED, STOPPED, DELETED
+  price      Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
