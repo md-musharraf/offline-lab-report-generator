@@ -40,4 +40,4 @@ Kya hoga: Staff salary, reagents/chemicals purchase, rent, aur light bills track
 
 4. 🔌 Advanced Machine Interfacing (Automation)
 Lab Analyzer Machine Integration:
-Kya hoga: Software ko direct laboratory ki machines (jaise Sysmex/Mindray CBC analyzer ya Bio-chemistry analyzer) ke serial port (COM Port) ya LAN port se link karna, taaki machine ke results direct software mein load ho jayein bina kisi manual typing ke. Isse human error 0% ho jata hai.
+Kya hoga: Software ko direct laboratory ki machines (jaise Sysmex/Mindray CBC analyzer ya Bio-chemistry analyzer) ke serial port (COM Port) ya LAN port se link karna, taaki machine ke results direct software mein load ho jayein bina kisi manual typing ke. Isse human error 0% ho jata hai.# offline-lab-report-generator
