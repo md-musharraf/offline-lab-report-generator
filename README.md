@@ -41,3 +41,34 @@ Kya hoga: Staff salary, reagents/chemicals purchase, rent, aur light bills track
 4. 🔌 Advanced Machine Interfacing (Automation)
 Lab Analyzer Machine Integration:
 Kya hoga: Software ko direct laboratory ki machines (jaise Sysmex/Mindray CBC analyzer ya Bio-chemistry analyzer) ke serial port (COM Port) ya LAN port se link karna, taaki machine ke results direct software mein load ho jayein bina kisi manual typing ke. Isse human error 0% ho jata hai.# offline-lab-report-generator
+
+---
+
+## Development
+
+Requirements: Node 20+ and Windows 10/11 (the installer target). The app is Electron 44 + a static Next.js 14 export + SQLite (Prisma 5).
+
+```bash
+npm install
+npm run electron:dev      # next dev + Electron (database: prisma/dev.db, created automatically)
+npm run build             # prisma client + prisma/schema.sql + static export to out/
+npm run electron:build    # build + Windows installer -> dist/JharLab Setup <version>.exe
+npm test                  # backend + analyzer (ASTM/HL7 over real TCP) tests against real SQLite
+npm run test:e2e          # Electron end-to-end tests on out/ (run `npm run build` first)
+```
+
+Run the E2E suite against the installed layout with `E2E_PACKAGED=1 npm run test:e2e` after `npm run pack`.
+
+How it fits together:
+
+- `main.js` — Electron main process. Serves `out/` and `/api/*` on the `app://-` origin, creates/updates the
+  database schema on startup (`prisma/schema.sql`, additive migrations), GPU acceleration with automatic
+  software fallback, single instance.
+- `lib/server-api.js` — the only backend: licence, setup, login, generic DB access, QR verification, admin
+  dashboard checks. Used by Electron and by `app/api/[...path]/route.ts` in `next dev`.
+- `lib/machineServer.js` — analyzer interfacing: ASTM E1381/E1394 and HL7/MLLP over LAN (server or client)
+  or RS-232/USB serial, host query order download, unit factors per machine code, auto-reconnect.
+- Data lives in `%APPDATA%\JharLab\dev.db`. `JHARLAB_USER_DATA=<dir>` runs on an isolated profile.
+
+Keyboard: `Ctrl+K` search · `F2` quick entry · `F3` results · `F4` reports · `F6` patients · `F7` billing ·
+`Enter` moves to the next field.

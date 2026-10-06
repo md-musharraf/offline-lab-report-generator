@@ -32,6 +32,7 @@ interface MachineConfig {
   bidirectional: boolean;
   autoApproveNormal: boolean;
   parameterMapping: ParameterMapping;
+  valueFactors?: Record<string, number>; // machine code -> multiplier for unit conversion
   testMapping: TestMapping;
 }
 
@@ -116,11 +117,13 @@ export default function MachineInterfacingPage() {
   const [selectedTestId, setSelectedTestId] = useState<string>('');
   const [selectedParamId, setSelectedParamId] = useState<string>('');
   const [mappingMachineCode, setMappingMachineCode] = useState<string>('');
+  const [mappingFactor, setMappingFactor] = useState<string>('');
 
   const [selectedMappingTestId, setSelectedMappingTestId] = useState<string>('');
   const [mappingMachineTestCode, setMappingMachineTestCode] = useState<string>('');
 
   const [simulatorPreset, setSimulatorPreset] = useState<string>('Mindray ASTM');
+  const [serialPorts, setSerialPorts] = useState<{ path: string; label: string }[]>([]);
   
   // Notification states
   const [notifications, setNotifications] = useState<ResultNotification[]>([]);
@@ -188,6 +191,8 @@ export default function MachineInterfacingPage() {
 
           const cachedOrphans = await eAPI.machineGetOrphans();
           if (cachedOrphans) setOrphans(cachedOrphans);
+
+          if (eAPI.machineListPorts) setSerialPorts(await eAPI.machineListPorts());
         } catch (err) {
           console.error('Failed to query Electron machine server APIs:', err);
         }
@@ -213,7 +218,7 @@ export default function MachineInterfacingPage() {
     });
 
     const cleanupLog = eAPI.onMachineLog((logEntry: LogEntry) => {
-      setLogs((prev) => [logEntry, ...prev]);
+      setLogs((prev) => [logEntry, ...prev].slice(0, 300));
     });
 
     const cleanupResultParsed = eAPI.onMachineResultParsed((data: { patientName: string; orderNo: string; count: number }) => {
@@ -250,7 +255,8 @@ export default function MachineInterfacingPage() {
   // 3. Autoscroll logic
   useEffect(() => {
     if (autoScroll && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      const consoleEl = terminalEndRef.current.parentElement?.parentElement;
+      if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
     }
   }, [logs, autoScroll, logFilter]);
 
@@ -335,24 +341,34 @@ export default function MachineInterfacingPage() {
       [cleanCode]: paramId
     };
 
+    const factor = Number(mappingFactor);
+    const valueFactors = { ...(config.valueFactors || {}) };
+    if (mappingFactor.trim() && factor > 0 && factor !== 1) valueFactors[cleanCode] = factor;
+    else delete valueFactors[cleanCode];
+
     const updatedConfig = {
       ...config,
-      parameterMapping: updatedMapping
+      parameterMapping: updatedMapping,
+      valueFactors
     };
 
     setConfig(updatedConfig);
     handleSaveConfig(updatedConfig);
     setMappingMachineCode('');
+    setMappingFactor('');
     triggerToast(`Mapped machine code "${cleanCode}" successfully.`, 'success');
   };
 
   const handleDeleteMapping = (machineCode: string) => {
     const updatedMapping = { ...config.parameterMapping };
     delete updatedMapping[machineCode];
+    const valueFactors = { ...(config.valueFactors || {}) };
+    delete valueFactors[machineCode];
 
     const updatedConfig = {
       ...config,
-      parameterMapping: updatedMapping
+      parameterMapping: updatedMapping,
+      valueFactors
     };
 
     setConfig(updatedConfig);
@@ -621,19 +637,25 @@ export default function MachineInterfacingPage() {
                       : 'bg-muted text-muted-foreground border-border'
                   }`}>
                     <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status === 'Listening' ? 'bg-teal-500 animate-ping' : status === 'Error' ? 'bg-red-500' : 'bg-muted-foreground'}`} />
-                    {status === 'Listening' ? 'LISTENING (ACTIVE)' : status === 'Error' ? 'CONNECTION ERROR' : 'INACTIVE'}
+                    {status === 'Listening' ? 'CONNECTED (ACTIVE)' : status === 'Connecting' ? 'CONNECTING…' : status === 'Error' ? 'CONNECTION ERROR' : 'INACTIVE'}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 max-w-xl">
                   {status === 'Listening'
-                    ? `TCP socket server is currently active on port ${config.tcpPort} listening for ${config.protocol} packets.`
-                    : 'System is offline. Start the analyzer listener server below to start capturing automated laboratory values.'}
+                    ? config.connectionType === 'COM'
+                      ? `Reading ${config.protocol} data from ${config.comPort} at ${config.baudRate} baud.`
+                      : config.tcpMode === 'Client'
+                        ? `Connected to the analyzer at ${config.tcpHost}:${config.tcpPort} (${config.protocol}).`
+                        : `Listening on TCP port ${config.tcpPort} for ${config.protocol} messages.`
+                    : status === 'Connecting'
+                      ? 'Waiting for the analyzer. The connection is retried automatically every 5 seconds.'
+                      : 'Interfacing is stopped. Start it to capture results from your analyzers automatically.'}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              {status === 'Listening' ? (
+              {status !== 'Inactive' ? (
                 <button
                   onClick={handleStopListener}
                   className="flex items-center gap-2 rounded-xl bg-destructive hover:bg-destructive/90 px-5 py-3 text-sm font-bold text-destructive-foreground shadow-lg shadow-destructive/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
@@ -730,8 +752,31 @@ export default function MachineInterfacingPage() {
                 <div className="border-t border-border/60 pt-4 space-y-4">
                   {config.connectionType === 'LAN' ? (
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="col-span-2">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Server Port</label>
+                      <div>
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">LIS Role</label>
+                        <select
+                          value={config.tcpMode}
+                          onChange={(e) => setConfig({ ...config, tcpMode: e.target.value as 'Server' | 'Client' })}
+                          className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-semibold"
+                        >
+                          <option value="Server">Server (analyzer connects to this PC)</option>
+                          <option value="Client">Client (this PC connects to analyzer)</option>
+                        </select>
+                      </div>
+                      {config.tcpMode === 'Client' && (
+                        <div>
+                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Analyzer IP Address</label>
+                          <input
+                            type="text"
+                            value={config.tcpHost}
+                            onChange={(e) => setConfig({ ...config, tcpHost: e.target.value.trim() })}
+                            placeholder="e.g. 192.168.1.50"
+                            className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-semibold"
+                          />
+                        </div>
+                      )}
+                      <div className={config.tcpMode === 'Client' ? 'col-span-2' : ''}>
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">{config.tcpMode === 'Client' ? 'Analyzer Port' : 'Listen Port'}</label>
                         <input
                           type="number"
                           value={config.tcpPort}
@@ -745,15 +790,21 @@ export default function MachineInterfacingPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">COM Port</label>
-                        <select
+                        <input
+                          list="detected-com-ports"
                           value={config.comPort}
-                          onChange={(e) => setConfig({ ...config, comPort: e.target.value })}
+                          onChange={(e) => setConfig({ ...config, comPort: e.target.value.trim().toUpperCase() })}
+                          placeholder="e.g. COM3"
                           className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-semibold"
-                        >
-                          {['COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8'].map((c) => (
-                            <option key={c} value={c}>{c}</option>
+                        />
+                        <datalist id="detected-com-ports">
+                          {serialPorts.map((p) => (
+                            <option key={p.path} value={p.path}>{p.label}</option>
                           ))}
-                        </select>
+                        </datalist>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {serialPorts.length ? `Detected: ${serialPorts.map((p) => p.label).join(', ')}` : 'No serial ports detected. Plug in the RS-232/USB cable.'}
+                        </p>
                       </div>
                       <div>
                         <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Baud Rate</label>
@@ -788,6 +839,18 @@ export default function MachineInterfacingPage() {
                         >
                           {['none', 'odd', 'even'].map((p) => (
                             <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Stop Bits</label>
+                        <select
+                          value={config.stopBits}
+                          onChange={(e) => setConfig({ ...config, stopBits: Number(e.target.value) })}
+                          className="mt-1 w-full rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary font-semibold"
+                        >
+                          {[1, 2].map((b) => (
+                            <option key={b} value={b}>{b}</option>
                           ))}
                         </select>
                       </div>
@@ -894,6 +957,17 @@ export default function MachineInterfacingPage() {
                         placeholder="Machine Code (e.g. WBC)"
                         className="w-full rounded-xl border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary font-mono font-bold uppercase"
                       />
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={mappingFactor}
+                        onChange={(e) => setMappingFactor(e.target.value)}
+                        placeholder="× 1"
+                        title="Unit conversion: the analyzer value is multiplied by this. E.g. WBC sent in 10³/µL → ×1000 for cells/cu.mm; platelets in 10³/µL → ×0.01 for lakh/cu.mm."
+                        aria-label="Multiply analyzer value by"
+                        className="w-24 shrink-0 rounded-xl border bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                      />
                       <button
                         onClick={handleAddMapping}
                         className="flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground px-4 text-xs font-bold hover:scale-[1.02] transition-all"
@@ -911,16 +985,17 @@ export default function MachineInterfacingPage() {
                       <tr className="bg-muted text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-b">
                         <th className="py-2.5 px-3">Machine Code</th>
                         <th className="py-2.5 px-3">LIS Parameter</th>
+                        <th className="py-2.5 px-3">Factor</th>
                         <th className="py-2.5 px-3 w-[50px]"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.keys(config.parameterMapping).length === 0 ? (
                         <tr>
-                          <td colSpan={3} className="py-8 text-center text-xs text-muted-foreground font-medium">
+                          <td colSpan={4} className="py-8 text-center text-xs text-muted-foreground font-medium">
                             No parameter mappings configured.
                             <br />
-                            <span className="text-[10px] opacity-70">(System will auto-match using name similarity)</span>
+                            <span className="text-[10px] opacity-70">Codes that equal a parameter&apos;s short name or full name match automatically. Map the rest here, with a unit factor where needed.</span>
                           </td>
                         </tr>
                       ) : (
@@ -934,6 +1009,7 @@ export default function MachineInterfacingPage() {
                                 <span className="font-semibold text-foreground">{details.paramName}</span>
                                 <span className="block text-[10px] text-muted-foreground">{details.testName}</span>
                               </td>
+                              <td className="py-2.5 px-3 font-mono text-muted-foreground">×{config.valueFactors?.[code] ?? 1}</td>
                               <td className="py-2.5 px-3 text-right">
                                 <button
                                   onClick={() => handleDeleteMapping(code)}

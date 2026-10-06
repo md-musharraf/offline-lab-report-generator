@@ -2,7 +2,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   ping: () => ipcRenderer.invoke('ping'),
-  printPdf: (pdfData) => ipcRenderer.invoke('print-pdf', pdfData),
   generateQrCode: (data) => ipcRenderer.invoke('generate-qrcode', data),
   // DB Methods via IPC
   dbQuery: (args) => ipcRenderer.invoke('db-query', args),
@@ -11,7 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   licenseActivate: (key) => ipcRenderer.invoke('license-activate', key),
   licenseRequestTrial: () => ipcRenderer.invoke('license-request-trial'),
   // Auto-Update Methods via IPC
-  downloadAndInstallUpdate: (url, version) => ipcRenderer.invoke('download-and-install-update', { url, version }),
+  downloadAndInstallUpdate: (url, version, sha256) => ipcRenderer.invoke('download-and-install-update', { url, version, sha256 }),
   onUpdateProgress: (callback) => {
     const listener = (event, data) => callback(data);
     ipcRenderer.on('update-progress', listener);
@@ -31,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   machineGetLogs: () => ipcRenderer.invoke('machine-get-logs'),
   machineClearLogs: () => ipcRenderer.invoke('machine-clear-logs'),
   machineSimulate: (type) => ipcRenderer.invoke('machine-simulate', type),
+  machineListPorts: () => ipcRenderer.invoke('machine-list-ports'),
   machineGetOrphans: () => ipcRenderer.invoke('machine-get-orphans'),
   machineDeleteOrphan: (id) => ipcRenderer.invoke('machine-delete-orphan', id),
   machineReconcileOrphan: (orphanId, orderBarcode) => ipcRenderer.invoke('machine-reconcile-orphan', { orphanId, orderBarcode }),

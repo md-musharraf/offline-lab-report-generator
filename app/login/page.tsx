@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [labName, setLabName] = useState('');
   const router = useRouter();
 
   // Global Enter key behaves like Tab
@@ -35,6 +36,8 @@ export default function LoginPage() {
           router.push('/setup');
           return;
         }
+        const settings = await db.query('labSettings', 'findFirst', { where: { id: 1 }, select: { labName: true } });
+        if (settings?.labName) setLabName(settings.labName);
       } catch (e) {
         console.warn('Local DB setup check failed, trying API route:', e);
         try {
@@ -229,97 +232,50 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0a0f] p-4 font-sans text-white">
-      {/* Dynamic colorful blur blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-blue-600/20 to-purple-600/20 blur-[130px] animate-pulse pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-pink-600/15 to-emerald-600/15 blur-[130px] animate-pulse pointer-events-none" />
-
-      <div className="z-10 flex w-full max-w-5xl flex-col gap-8 lg:flex-row items-center">
-        {/* Left Side: Brand Info */}
-        <div className="flex-1 space-y-6 text-center lg:text-left">
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="inline-flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-2"
-          >
-            <Activity className="h-5 w-5 text-blue-500 animate-pulse" />
-            <span className="text-xs font-semibold tracking-wider text-blue-400 uppercase">JharLab Pathology LIS</span>
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="text-4xl font-extrabold tracking-tight sm:text-5xl"
-          >
-            Laboratory Information <br />
-            <span className="bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
-              System Dashboard
-            </span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="max-w-md text-sm text-gray-400 leading-relaxed mx-auto lg:mx-0"
-          >
-            A secure, role-based desktop environment ensuring lab settings, patient registers, results, and billing remain highly protected and organized.
-          </motion.p>
-
-          {/* Quick Demo Pre-fill cards - Only in development mode */}
-          {process.env.NODE_ENV === 'development' && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
-              className="space-y-3"
-            >
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest text-center lg:text-left">
-                Quick Test Accounts
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {demoAccounts.map((demo) => {
-                  const Icon = demo.icon;
-                  return (
-                    <button
-                      key={demo.role}
-                      onClick={() => handleDemoSelect(demo)}
-                      className="flex flex-col items-center lg:items-start text-left p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-white/20 hover:bg-white/[0.06] transition-all hover:scale-[1.03] active:scale-[0.98] group"
-                    >
-                      <div className={`flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br ${demo.color} shadow-lg text-white mb-2.5`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <span className="text-xs font-bold text-gray-200">{demo.role}</span>
-                      <span className="text-[10px] text-gray-500 group-hover:text-gray-400 transition-colors mt-0.5 select-all">{demo.email}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
+    <div className="flex min-h-screen bg-background font-sans text-foreground">
+      {/* Brand panel */}
+      <div className="relative hidden w-[44%] flex-col justify-between overflow-hidden bg-primary p-10 text-primary-foreground lg:flex">
+        <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-white/10" />
+        <div className="absolute -bottom-32 -left-16 h-96 w-96 rounded-full bg-white/5" />
+        <div className="relative flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white">
+            <img src="/logo.png" alt="" className="h-7 w-7 object-contain" />
+          </div>
+          <div className="leading-tight">
+            <div className="text-lg font-bold tracking-tight">JharLab</div>
+            <div className="text-xs text-primary-foreground/75">Laboratory Information System</div>
+          </div>
         </div>
+        <div className="relative space-y-4">
+          <h1 className="text-4xl font-bold leading-tight tracking-tight">{labName || 'Your lab'},<br />ready for today&apos;s samples.</h1>
+          <ul className="space-y-2.5 text-sm text-primary-foreground/85">
+            {['Registration, billing and barcodes in one screen', 'Analyzer results flow in automatically', 'Works fully offline: your data stays on this PC'].map(t => (
+              <li key={t} className="flex items-center gap-2.5"><Activity className="h-4 w-4 shrink-0" />{t}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="relative text-xs text-primary-foreground/60">v{process.env.NEXT_PUBLIC_APP_VERSION} · Press Enter to move between fields</div>
+      </div>
 
-        {/* Right Side: Login Form Card */}
+      {/* Sign-in form */}
+      <div className="flex flex-1 items-center justify-center p-6">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, type: 'spring', damping: 20 }}
-          className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.03] p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="w-full max-w-sm"
         >
-          <div className="absolute top-0 right-0 h-40 w-40 rounded-full bg-gradient-to-br from-blue-500/10 to-purple-500/10 blur-3xl pointer-events-none" />
-          
-          <h2 className="text-2xl font-bold tracking-tight text-white mb-1.5">Sign In</h2>
-          <p className="text-xs text-gray-400 mb-6">Enter your lab credentials to access your dashboard</p>
+          <h2 className="text-2xl font-semibold tracking-tight">Sign in</h2>
+          <p className="mb-6 mt-1 text-sm text-muted-foreground">Use the account your lab owner created for you.</p>
 
           <AnimatePresence>
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: -10 }}
+                role="alert"
+                initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="flex items-center gap-2.5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-red-400 mb-5"
+                exit={{ opacity: 0 }}
+                className="mb-4 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive"
               >
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span>{error}</span>
@@ -329,40 +285,46 @@ export default function LoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-300">Email Address</label>
+              <label htmlFor="login-email" className="text-sm font-medium">Email address</label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  id="login-email"
                   type="email"
+                  autoFocus
+                  autoComplete="username"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
                     if (error) setError(null);
                   }}
                   placeholder="name@lab.com"
-                  className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-11 pr-4 py-3 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600"
+                  className="w-full rounded-lg border bg-card pl-10 pr-3 text-sm"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-300">Password</label>
+              <label htmlFor="login-password" className="text-sm font-medium">Password</label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  id="login-password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
                     if (error) setError(null);
                   }}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-white/10 bg-white/[0.02] pl-11 pr-11 py-3 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600"
+                  className="w-full rounded-lg border bg-card pl-10 pr-11 text-sm"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 focus:outline-none p-1"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -372,38 +334,42 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 py-3 text-sm font-bold text-white shadow-lg transition-all hover:shadow-blue-500/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
                 <>
-                  <span>Authenticate Session</span>
+                  <span>Sign in</span>
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
             </button>
           </form>
+
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-8 space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Development test accounts</p>
+              <div className="grid grid-cols-3 gap-2">
+                {demoAccounts.map((demo) => {
+                  const Icon = demo.icon;
+                  return (
+                    <button
+                      key={demo.role}
+                      type="button"
+                      onClick={() => handleDemoSelect(demo)}
+                      className="flex flex-col items-start gap-1 rounded-lg border bg-card p-2.5 text-left text-xs transition-colors hover:border-primary/40"
+                    >
+                      <Icon className={`h-4 w-4 ${demo.textColor}`} />
+                      <span className="font-semibold">{demo.role}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </motion.div>
       </div>
-      <style dangerouslySetInnerHTML={{__html: `
-        /* Overrides Chrome/Chromium autofill background and text color */
-        input:-webkit-autofill,
-        input:-webkit-autofill:hover, 
-        input:-webkit-autofill:focus,
-        input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 30px #181824 inset !important;
-          -webkit-text-fill-color: white !important;
-          caret-color: white !important;
-        }
-        
-        /* Overrides global input focus background-color to keep it dark on the login page */
-        input:focus {
-          background-color: rgba(255, 255, 255, 0.04) !important;
-          color: white !important;
-          border-color: rgba(59, 130, 246, 0.5) !important;
-        }
-      `}} />
     </div>
   );
 }

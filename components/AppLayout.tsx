@@ -1,8 +1,9 @@
 "use client";
 import { Sidebar } from '@/components/Sidebar';
-import { useState, useEffect } from 'react';
+import { CommandPalette } from '@/components/CommandPalette';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Bell, Moon, Sun, User, LogOut, ChevronRight, Wifi, WifiOff, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Search, Moon, Sun, LogOut, ChevronRight, WifiOff, Send, ShieldAlert } from 'lucide-react';
 import { useEnterAsTab } from '@/lib/useEnterAsTab';
 import { useRouter, usePathname } from 'next/navigation';
 import { getRoleAndPermissions } from '@/lib/utils';
@@ -13,506 +14,290 @@ interface AppLayoutProps {
   breadcrumbs?: { label: string; href?: string }[];
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'Lab Owner',
+  RECEPTIONIST: 'Receptionist',
+  TECHNICIAN: 'Lab Technician',
+  PATHOLOGIST: 'Pathologist',
+};
+
+const SHORTCUTS: Record<string, string> = {
+  F2: '/quick-register',
+  F3: '/results',
+  F4: '/reports',
+  F6: '/patients',
+  F7: '/billing',
+};
+
+const ROLE_PATHS: Record<string, string[]> = {
+  RECEPTIONIST: ['/dashboard', '/quick-register', '/patients', '/samples', '/reports', '/billing', '/doctors', '/home-collection', '/outsource', '/tests', '/contact'],
+  TECHNICIAN: ['/dashboard', '/quick-register', '/patients', '/samples', '/results', '/reports', '/tests', '/quality-control', '/inventory', '/settings/machine', '/contact'],
+  PATHOLOGIST: ['/dashboard', '/patients', '/samples', '/results', '/reports', '/tests', '/quality-control', '/contact'],
+};
+
+function isPathAllowed(path: string, userRole: string): boolean {
+  const { role, permissions } = getRoleAndPermissions(userRole);
+  const r = role.toUpperCase();
+  if (r === 'SUPER_ADMIN' || r === 'ADMIN') return true;
+  const allowed = [...(ROLE_PATHS[r] || [])];
+  if (r === 'RECEPTIONIST' && permissions.includes('ACCESS_RESULTS')) allowed.push('/results');
+  if (r === 'TECHNICIAN' && permissions.includes('ACCESS_BILLING')) allowed.push('/billing');
+  return allowed.some(p => path === p || path.startsWith(p + '/'));
+}
+
+const readOutbox = (): any[] => {
+  try {
+    return JSON.parse(localStorage.getItem('pathology_lab_outbox_queue') || '[]');
+  } catch {
+    return [];
+  }
+};
+
 export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
   const [darkMode, setDarkMode] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(true);
+  const [outboxCount, setOutboxCount] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
-  // Connection & synchronization states
-  const [isOnline, setIsOnline] = useState(true);
-  const [syncStatus, setSyncStatus] = useState<'IDLE' | 'SYNCING' | 'SUCCESS' | 'ERROR'>('IDLE');
-  const [pendingCount, setPendingCount] = useState(0);
-
-  // Global: Enter key behaves like Tab across all form inputs
+  // Enter moves to the next field on every form.
   useEnterAsTab();
 
-  // Monitor connection status & handle syncing
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setIsOnline(window.navigator.onLine);
-      
-      const handleOnline = () => {
-        setIsOnline(true);
-        addSyncLog("WiFi connection restored. Resuming background database synchronization...");
-        triggerBackgroundSync();
-      };
-      
-      const handleOffline = () => {
-        setIsOnline(false);
-        addSyncLog("WiFi connection lost. Switching to Local Offline Mode. Data will be cached in SQLite.");
-      };
-
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-
-      // Check initial queues
-      updatePendingCounts();
-
-      // Listen to storage events to update counts live across page navigations
-      const handleStorage = () => {
-        updatePendingCounts();
-      };
-      window.addEventListener('storage', handleStorage);
-
-      return () => {
-        window.removeEventListener('online', handleOnline);
-        window.removeEventListener('offline', handleOffline);
-        window.removeEventListener('storage', handleStorage);
-      };
-    }
+    setDarkMode(document.documentElement.classList.contains('dark'));
+    setIsOnline(navigator.onLine);
+    setOutboxCount(readOutbox().length);
+    const online = () => setIsOnline(true);
+    const offline = () => setIsOnline(false);
+    const storage = () => setOutboxCount(readOutbox().length);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    window.addEventListener('storage', storage);
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('storage', storage);
+    };
   }, []);
 
-  // Session monitoring & redirect
+  // Session: first-run setup goes to /setup, otherwise a signed-in user is required.
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const setupRes = await fetch('/api/auth/setup-status');
-        const setupData = await setupRes.json();
-        if (setupRes.ok && setupData.isSetupRequired) {
+        const res = await fetch('/api/auth/setup-status');
+        const data = await res.json();
+        if (res.ok && data.isSetupRequired) {
           router.push('/setup');
           return;
         }
       } catch (e) {
         console.error('Failed to check setup status:', e);
       }
-
-      const userStr = localStorage.getItem('pathology_lab_current_user');
-      if (!userStr) {
+      try {
+        const user = JSON.parse(localStorage.getItem('pathology_lab_current_user') || 'null');
+        if (!user) router.push('/login');
+        else setCurrentUser(user);
+      } catch {
         router.push('/login');
-      } else {
-        try {
-          setCurrentUser(JSON.parse(userStr));
-        } catch (e) {
-          router.push('/login');
-        }
       }
       setSessionLoading(false);
     };
-
     checkSession();
-
-    window.addEventListener('storage', checkSession);
-    return () => {
-      window.removeEventListener('storage', checkSession);
-    };
   }, [router]);
 
-  // Sync polling loop every 25 seconds
+  // Global keyboard shortcuts.
   useEffect(() => {
-    if (!isOnline) return;
-    
-    // Initial sync check on mount
-    triggerBackgroundSync();
-
-    const interval = setInterval(() => {
-      triggerBackgroundSync();
-    }, 25000);
-
-    return () => clearInterval(interval);
-  }, [isOnline]);
-
-  const updatePendingCounts = () => {
-    if (typeof window !== 'undefined') {
-      const unsyncedStr = localStorage.getItem('pathology_lab_unsynced_items') || '[]';
-      const outboxStr = localStorage.getItem('pathology_lab_outbox_queue') || '[]';
-      try {
-        const unsynced = JSON.parse(unsyncedStr);
-        const outbox = JSON.parse(outboxStr);
-        setPendingCount(unsynced.length + outbox.length);
-      } catch (e) {
-        setPendingCount(0);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(o => !o);
+      } else if (SHORTCUTS[e.key] && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        setPaletteOpen(false);
+        router.push(SHORTCUTS[e.key]);
       }
-    }
-  };
-
-  const addSyncLog = (message: string) => {
-    if (typeof window !== 'undefined') {
-      const logsStr = localStorage.getItem('pathology_lab_sync_logs') || '[]';
-      try {
-        const logs = JSON.parse(logsStr);
-        logs.unshift({
-          id: Date.now() + Math.random().toString(),
-          timestamp: new Date().toISOString(),
-          message
-        });
-        if (logs.length > 80) logs.pop();
-        localStorage.setItem('pathology_lab_sync_logs', JSON.stringify(logs));
-        window.dispatchEvent(new Event('storage'));
-      } catch (e) {}
-    }
-  };
-
-  const triggerBackgroundSync = async () => {
-    if (typeof window === 'undefined' || !window.navigator.onLine) return;
-    
-    const unsyncedStr = localStorage.getItem('pathology_lab_unsynced_items') || '[]';
-    const outboxStr = localStorage.getItem('pathology_lab_outbox_queue') || '[]';
-    
-    let unsynced: string[] = [];
-    let outbox: any[] = [];
-    try {
-      unsynced = JSON.parse(unsyncedStr);
-      outbox = JSON.parse(outboxStr);
-    } catch (e) {
-      return;
-    }
-
-    if (unsynced.length === 0 && outbox.length === 0) {
-      return;
-    }
-
-    setSyncStatus('SYNCING');
-    addSyncLog(`Background sync manager active. Found ${unsynced.length} pending records and ${outbox.length} alerts to synchronize.`);
-
-    // 1. Sync local records to cloud
-    if (unsynced.length > 0) {
-      for (const id of unsynced) {
-        addSyncLog(`Syncing local patient order ID: ${id} to cloud database...`);
-        await new Promise(r => setTimeout(r, 1000)); // simulate upload time
-        addSyncLog(`Cloud Sync Success: Patient order ID ${id} uploaded.`);
-      }
-      localStorage.setItem('pathology_lab_unsynced_items', '[]');
-    }
-
-    // 2. Deliver outbox alerts (WhatsApp/Email)
-    if (outbox.length > 0) {
-      for (const msg of outbox) {
-        addSyncLog(`Delivering pending ${msg.type} alert to patient ${msg.patient} (${msg.contact})...`);
-        await new Promise(r => setTimeout(r, 1000));
-        
-        // Simulating the actual open/deliver trigger
-        if (msg.type === 'WhatsApp') {
-          const text = encodeURIComponent(msg.text || '');
-          window.open(`https://wa.me/?text=${text}`, '_blank');
-        } else {
-          const subject = encodeURIComponent(msg.subject || '');
-          const body = encodeURIComponent(msg.body || '');
-          window.open(`mailto:?subject=${subject}&body=${body}`, '_self');
-        }
-        
-        addSyncLog(`Alert Delivery Success: ${msg.type} notification sent to ${msg.patient}.`);
-      }
-      localStorage.setItem('pathology_lab_outbox_queue', '[]');
-    }
-
-    setSyncStatus('SUCCESS');
-    addSyncLog(`Sync cycle completed successfully. Cloud database in sync.`);
-    setPendingCount(0);
-    window.dispatchEvent(new Event('storage'));
-  };
-
-  // Sync initial dark mode state from document.documentElement
-  useEffect(() => {
-    setDarkMode(document.documentElement.classList.contains('dark'));
-  }, []);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [router]);
 
   const toggleDarkMode = () => {
-    const nextDark = !darkMode;
-    setDarkMode(nextDark);
-    if (nextDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.classList.toggle('dark', next);
+    try {
+      localStorage.setItem('jharlab_theme', next ? 'dark' : 'light');
+    } catch {}
   };
 
-  const isPathAllowed = (path: string, userRole: string): boolean => {
-    const { role, permissions } = getRoleAndPermissions(userRole);
-    const upperRole = role.toUpperCase();
-    if (upperRole === 'SUPER_ADMIN' || upperRole === 'ADMIN') return true;
-
-    if (upperRole === 'RECEPTIONIST') {
-      const allowed = [
-        '/dashboard',
-        '/quick-register',
-        '/patients',
-        '/samples',
-        '/reports',
-        '/billing',
-        '/doctors',
-        '/home-collection',
-        '/outsource',
-        '/tests',
-        '/contact'
-      ];
-      if (permissions.includes('ACCESS_RESULTS')) {
-        allowed.push('/results', '/results/entry');
+  // WhatsApp / e-mail alerts queued while offline are sent when the user asks, not by popping windows unprompted.
+  const deliverOutbox = useCallback(() => {
+    const queue = readOutbox();
+    for (const msg of queue) {
+      if (msg.type === 'WhatsApp') {
+        const digits = String(msg.contact || '').replace(/\D/g, '');
+        const phone = digits.length === 10 ? `91${digits}` : digits;
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg.text || '')}`, '_blank');
+      } else {
+        window.open(`mailto:?subject=${encodeURIComponent(msg.subject || '')}&body=${encodeURIComponent(msg.body || '')}`, '_blank');
       }
-      return allowed.some(p => path === p || path.startsWith(p + '/'));
     }
+    localStorage.setItem('pathology_lab_outbox_queue', '[]');
+    setOutboxCount(0);
+  }, []);
 
-    if (upperRole === 'TECHNICIAN') {
-      const allowed = [
-        '/dashboard',
-        '/quick-register',
-        '/patients',
-        '/samples',
-        '/results',
-        '/reports',
-        '/tests',
-        '/quality-control',
-        '/inventory',
-        '/settings/machine',
-        '/contact'
-      ];
-      if (permissions.includes('ACCESS_BILLING')) {
-        allowed.push('/billing', '/billing/new');
-      }
-      return allowed.some(p => path === p || path.startsWith(p + '/'));
-    }
-
-    if (upperRole === 'PATHOLOGIST') {
-      const allowed = [
-        '/dashboard',
-        '/patients',
-        '/samples',
-        '/results',
-        '/reports',
-        '/tests',
-        '/quality-control',
-        '/contact'
-      ];
-      return allowed.some(p => path === p || path.startsWith(p + '/'));
-    }
-
-    return false;
+  const logout = () => {
+    localStorage.removeItem('pathology_lab_current_user');
+    router.push('/login');
   };
 
   if (sessionLoading || !currentUser) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0f] text-white">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm font-medium text-muted-foreground animate-pulse">Verifying Session...</p>
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Loading…</p>
         </div>
       </div>
     );
   }
 
+  const role = getRoleAndPermissions(currentUser.role).role;
   const allowed = isPathAllowed(pathname, currentUser.role);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background relative">
-      {/* Ambient blurred background blobs for glassmorphism */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45%] h-[45%] rounded-full bg-gradient-to-br from-primary/12 to-purple-500/12 blur-[120px] pointer-events-none z-0" />
-      <div className="absolute bottom-[-10%] right-[10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-pink-500/8 to-indigo-500/12 blur-[130px] pointer-events-none z-0" />
-      
-      <div className="relative z-10 flex h-full w-full overflow-hidden">
-        <Sidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top Header — Taller with better spacing & glassmorphism */}
-        <header className="flex h-16 items-center justify-between border-b bg-card/85 backdrop-blur-md px-6 shrink-0 z-10 sticky top-0">
-          <div className="flex items-center gap-3">
-            <div>
-              {breadcrumbs && breadcrumbs.length > 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
-                  {breadcrumbs.map((crumb, i) => (
-                    <span key={i} className="flex items-center gap-1.5">
-                      {i > 0 && <ChevronRight className="h-3 w-3 opacity-40" />}
-                      <span className={crumb.href ? 'text-primary cursor-pointer hover:underline font-medium' : 'font-medium'}>
-                        {crumb.label}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <h1 className="text-xl font-bold text-foreground tracking-tight">{title}</h1>
-            </div>
+    <div className="flex h-screen overflow-hidden bg-background">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-4 border-b bg-card px-6">
+          <div className="min-w-0">
+            {breadcrumbs && breadcrumbs.length > 0 && (
+              <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                {breadcrumbs.map((crumb, i) => (
+                  <span key={i} className="flex items-center gap-1">
+                    {i > 0 && <ChevronRight className="h-3 w-3 opacity-50" />}
+                    {crumb.href ? (
+                      <button onClick={() => router.push(crumb.href!)} className="hover:text-foreground hover:underline">{crumb.label}</button>
+                    ) : (
+                      <span>{crumb.label}</span>
+                    )}
+                  </span>
+                ))}
+              </nav>
+            )}
+            <h1 className="truncate text-[17px] font-semibold leading-tight tracking-tight text-foreground">{title}</h1>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Global Search */}
-            <div className="relative">
-              <button
-                onClick={() => setSearchOpen(!searchOpen)}
-                className="flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <Search className="h-[18px] w-[18px]" />
-              </button>
-              <AnimatePresence>
-                {searchOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, width: 0 }}
-                    animate={{ opacity: 1, width: 300 }}
-                    exit={{ opacity: 0, width: 0 }}
-                    className="absolute right-0 top-0 overflow-hidden"
-                  >
-                    <input
-                      autoFocus
-                      type="text"
-                      placeholder="Search patients, orders..."
-                      className="h-10 w-full rounded-xl border bg-background px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                      onBlur={() => setSearchOpen(false)}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto flex h-9 w-72 items-center gap-2 rounded-lg border bg-background px-3 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            <Search className="h-4 w-4" />
+            <span>Search patients, orders…</span>
+            <kbd className="ml-auto">Ctrl K</kbd>
+          </button>
 
-            {/* Connection Status Widget */}
-            <div className="flex items-center gap-2 mr-2">
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border ${
-                isOnline 
-                  ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400' 
-                  : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-              }`}>
-                {isOnline ? (
-                  <>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                    </span>
-                    <Wifi className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">WiFi Online</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="relative flex h-2 w-2">
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500 animate-pulse"></span>
-                    </span>
-                    <WifiOff className="h-3.5 w-3.5" />
-                    <span>Local Offline</span>
-                  </>
-                )}
-              </span>
-              
-              {pendingCount > 0 && (
-                <button
-                  onClick={triggerBackgroundSync}
-                  disabled={!isOnline || syncStatus === 'SYNCING'}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border shadow-sm transition-all ${
-                    syncStatus === 'SYNCING'
-                      ? 'bg-blue-500/10 border-blue-500/20 text-blue-600 animate-pulse'
-                      : isOnline
-                        ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-600 hover:bg-indigo-500/25 cursor-pointer hover:scale-[1.02]'
-                        : 'bg-muted border-border text-muted-foreground cursor-not-allowed'
-                  }`}
-                  title={isOnline ? "Click to Sync Queued Data Now" : "WiFi offline: Data will auto-sync on reconnect"}
-                >
-                  {syncStatus === 'SYNCING' ? (
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                  <span>Outbox ({pendingCount})</span>
-                </button>
-              )}
-            </div>
+          {!isOnline && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-400" title="Everything keeps working offline. Online features (licence check, updates, WhatsApp links) resume when connected.">
+              <WifiOff className="h-3.5 w-3.5" /> Offline
+            </span>
+          )}
 
-            {/* Dark Mode Toggle */}
+          {outboxCount > 0 && (
             <button
-              onClick={toggleDarkMode}
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              onClick={deliverOutbox}
+              disabled={!isOnline}
+              title={isOnline ? 'Send the queued WhatsApp / e-mail alerts now' : 'Queued alerts can be sent once you are online'}
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {darkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+              <Send className="h-3.5 w-3.5" /> Send {outboxCount} queued alert{outboxCount > 1 ? 's' : ''}
             </button>
+          )}
 
-            {/* Notifications */}
-            <button className="relative flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-              <Bell className="h-[18px] w-[18px]" />
-              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white animate-pulse">
-                3
-              </span>
+          <button
+            onClick={toggleDarkMode}
+            aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={darkMode ? 'Light theme' : 'Dark theme'}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {darkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+          </button>
+
+          <div className="relative">
+            <button
+              onClick={() => setUserMenuOpen(o => !o)}
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              className="flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-accent"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground select-none">
+                {currentUser?.name?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className="hidden text-left leading-tight md:block">
+                <div className="max-w-[140px] truncate text-[13px] font-semibold text-foreground">{currentUser?.name || 'User'}</div>
+                <div className="text-[11px] text-muted-foreground">{ROLE_LABELS[role] || role || 'Staff'}</div>
+              </div>
             </button>
-
-            {/* User Menu */}
-            <div className="relative ml-2">
-              <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 hover:bg-accent transition-colors"
-              >
-                <div className="relative">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-white font-bold text-sm shadow-sm select-none">
-                    {currentUser?.name?.charAt(0).toUpperCase() || 'U'}
-                  </div>
-                  {/* Online indicator */}
-                  <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-green-500 border-2 border-card" />
-                </div>
-                <div className="hidden md:block text-left">
-                  <div className="text-sm font-semibold text-foreground truncate max-w-[120px]">{currentUser?.name || 'User'}</div>
-                  <div className="text-[10px] text-muted-foreground font-medium">
-                    {getRoleAndPermissions(currentUser?.role).role === 'SUPER_ADMIN' 
-                      ? 'Super Admin' 
-                      : getRoleAndPermissions(currentUser?.role).role === 'ADMIN' 
-                        ? 'Admin Owner' 
-                        : getRoleAndPermissions(currentUser?.role).role === 'RECEPTIONIST' 
-                          ? 'Receptionist' 
-                          : getRoleAndPermissions(currentUser?.role).role === 'TECHNICIAN' 
-                            ? 'Lab Technician' 
-                            : getRoleAndPermissions(currentUser?.role).role || 'Staff'}
-                  </div>
-                </div>
-              </button>
-              <AnimatePresence>
-                {userMenuOpen && (
+            <AnimatePresence>
+              {userMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
                   <motion.div
-                    initial={{ opacity: 0, y: -10 }}
+                    role="menu"
+                    initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="absolute right-0 top-full mt-1.5 w-52 rounded-xl border bg-card p-1.5 shadow-xl z-50"
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute right-0 top-full z-50 mt-1.5 w-56 rounded-lg border bg-popover p-1 shadow-lg"
                   >
-                    <div className="px-3 py-2 border-b border-border/50 mb-1">
-                      <p className="text-xs font-bold text-foreground truncate">{currentUser?.name}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">{currentUser?.email}</p>
+                    <div className="border-b px-3 py-2">
+                      <p className="truncate text-sm font-semibold">{currentUser?.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{currentUser?.email}</p>
                     </div>
-                    <button 
-                      onClick={() => {
-                        localStorage.removeItem('pathology_lab_current_user');
-                        router.push('/login');
-                      }}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                    <button
+                      role="menuitem"
+                      onClick={logout}
+                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
                     >
-                      <LogOut className="h-4 w-4" />
-                      Logout
+                      <LogOut className="h-4 w-4" /> Sign out
                     </button>
                   </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                </>
+              )}
+            </AnimatePresence>
           </div>
         </header>
 
-        {/* Main Content */}
         <main className="flex-1 overflow-y-auto p-6">
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            {!allowed ? (
-              <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 text-center">
-                <motion.div
-                  initial={{ scale: 0.95, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', damping: 15 }}
-                  className="flex flex-col items-center max-w-md p-8 rounded-3xl border border-destructive/20 bg-destructive/5 backdrop-blur-md shadow-lg"
-                >
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-destructive/10 text-destructive mb-6 animate-bounce">
-                    <ShieldAlert className="h-8 w-8" />
+          <motion.div key={pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+            {allowed ? (
+              children
+            ) : (
+              <div className="flex min-h-[50vh] items-center justify-center p-8">
+                <div className="flex max-w-md flex-col items-center rounded-xl border bg-card p-8 text-center shadow-sm">
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                    <ShieldAlert className="h-6 w-6" />
                   </div>
-                  <h2 className="text-xl font-bold text-foreground mb-2">Access Denied</h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-6">
-                    You do not have the required permissions to access the <span className="font-semibold text-foreground">"{title}"</span> section. Please contact the Lab Owner for privileges.
-                  </p>
+                  <h2 className="mb-1 text-lg font-semibold">You don&apos;t have access to {title}</h2>
+                  <p className="mb-6 text-sm text-muted-foreground">Ask the lab owner to grant you this permission.</p>
                   <button
                     onClick={() => router.push('/dashboard')}
-                    className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm hover:shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
                   >
-                    Return to Dashboard
+                    Back to dashboard
                   </button>
-                </motion.div>
+                </div>
               </div>
-            ) : (
-              children
             )}
           </motion.div>
         </main>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} role={currentUser.role} />
     </div>
-  </div>
   );
 }

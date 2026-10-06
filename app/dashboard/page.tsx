@@ -575,7 +575,7 @@ export default function DashboardPage() {
       <div className="space-y-6">
 
         {/* Welcome and Quick Entry Banner */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-r from-blue-950/40 to-indigo-950/30 border border-blue-500/10 rounded-xl p-5 shadow-sm">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-card border border-l-4 border-l-primary rounded-xl p-5 shadow-sm">
           <div>
             <h2 className="text-base font-bold text-foreground">{getGreeting()} — Welcome to JharLab</h2>
             <p className="text-xs text-muted-foreground">Offline diagnostics dashboard. Register patients, input values, and download reports instantly.</p>

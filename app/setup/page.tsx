@@ -269,35 +269,33 @@ export default function SetupPage() {
     }
   };
 
-  const inputClass = "w-full rounded-xl border border-white/10 bg-white/[0.02] pl-11 pr-4 py-3 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600";
-  const labelClass = "text-xs font-semibold text-gray-300";
+  const inputClass = "w-full rounded-xl border bg-background pl-11 pr-4 py-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground";
+  const labelClass = "text-xs font-semibold text-foreground";
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0a0f] p-4 font-sans text-white">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4 py-10 font-sans text-foreground">
       {/* Glowing backdrop blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-blue-600/15 to-indigo-600/15 blur-[130px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-gradient-to-br from-purple-600/15 to-pink-600/15 blur-[130px] pointer-events-none" />
 
       <div className="z-10 flex w-full max-w-4xl flex-col items-center gap-6">
         {/* Logo and Brand */}
         <div className="flex flex-col items-center text-center space-y-2 mb-2">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-lg shadow-blue-500/20">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary shadow-sm">
             <Activity className="h-6 w-6 text-white" />
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight">JharLab Laboratory Setup</h1>
-          <p className="text-sm text-gray-400 max-w-md">Initialize your pathology LIS database, lab profiles, and owner administrator account.</p>
+          <p className="text-sm text-muted-foreground max-w-md">Initialize your pathology LIS database, lab profiles, and owner administrator account.</p>
         </div>
 
         {/* Setup Wizard Box */}
-        <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/[0.02] p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div className="w-full max-w-xl rounded-2xl border bg-card p-8 shadow-sm relative overflow-hidden">
           
           {/* Top Progress bar */}
-          <div className="flex items-center justify-between mb-8 text-xs text-gray-400 font-semibold uppercase tracking-wider">
-            <span className={step === 1 ? 'text-blue-400 font-bold' : step > 1 ? 'text-green-500' : ''}>1. Lab Profile</span>
-            <span className="h-[2px] flex-1 bg-white/10 mx-3" />
-            <span className={step === 2 ? 'text-blue-400 font-bold' : step > 2 ? 'text-green-500' : ''}>2. Admin Credentials</span>
-            <span className="h-[2px] flex-1 bg-white/10 mx-3" />
-            <span className={step >= 3 ? 'text-blue-400 font-bold' : ''}>3. Config & Seed</span>
+          <div className="flex items-center justify-between mb-8 text-xs text-muted-foreground font-semibold uppercase tracking-wider">
+            <span className={step === 1 ? 'text-primary font-bold' : step > 1 ? 'text-green-600' : ''}>1. Lab Profile</span>
+            <span className="h-[2px] flex-1 bg-border mx-3" />
+            <span className={step === 2 ? 'text-primary font-bold' : step > 2 ? 'text-green-600' : ''}>2. Admin Credentials</span>
+            <span className="h-[2px] flex-1 bg-border mx-3" />
+            <span className={step >= 3 ? 'text-primary font-bold' : ''}>3. Config & Seed</span>
           </div>
 
           <AnimatePresence mode="wait">
@@ -306,7 +304,7 @@ export default function SetupPage() {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex items-center gap-2.5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-red-400 mb-6"
+                className="flex items-center gap-2.5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-destructive mb-6"
               >
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span>{error}</span>
@@ -323,13 +321,13 @@ export default function SetupPage() {
               className="space-y-4"
             >
               <h2 className="text-xl font-bold mb-1">Laboratory Information</h2>
-              <p className="text-xs text-gray-400 mb-4">Provide details that will appear on print headers, billing invoices, and test report footers.</p>
+              <p className="text-xs text-muted-foreground mb-4">Provide details that will appear on print headers, billing invoices, and test report footers.</p>
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
                   <label className={labelClass}>Laboratory Name *</label>
                   <div className="relative">
-                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                    <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground" />
                     <input
                       type="text"
                       value={labName}
@@ -348,7 +346,7 @@ export default function SetupPage() {
                       value={labMobile}
                       onChange={(e) => setLabMobile(e.target.value)}
                       placeholder="e.g. 9876543210"
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600"
+                      className="w-full rounded-xl border bg-background px-4 py-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -358,7 +356,7 @@ export default function SetupPage() {
                       value={labEmail}
                       onChange={(e) => setLabEmail(e.target.value)}
                       placeholder="e.g. contact@lab.com"
-                      className="w-full rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600"
+                      className="w-full rounded-xl border bg-background px-4 py-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground"
                     />
                   </div>
                 </div>
@@ -370,15 +368,15 @@ export default function SetupPage() {
                     value={labAddress}
                     onChange={(e) => setLabAddress(e.target.value)}
                     placeholder="e.g. 1st Floor, Royal Plaza, Court Road, Ranchi, Jharkhand"
-                    className="w-full rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm text-white focus:border-blue-500/50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all placeholder:text-gray-600 resize-none"
+                    className="w-full rounded-xl border bg-background p-4 text-sm text-foreground transition-colors placeholder:text-muted-foreground resize-none"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end pt-4 border-t border-white/5 mt-6">
+              <div className="flex justify-end pt-4 border-t border-border mt-6">
                 <button
                   onClick={handleNextStep}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 px-5 py-3 text-sm font-bold text-white shadow-lg transition-all"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 px-5 py-3 text-sm font-bold text-white shadow-lg transition-all"
                 >
                   <span>Owner Account Credentials</span>
                   <ChevronRight className="h-4 w-4" />
@@ -397,13 +395,13 @@ export default function SetupPage() {
               className="space-y-4"
             >
               <h2 className="text-xl font-bold mb-1">Create Owner Credentials</h2>
-              <p className="text-xs text-gray-400 mb-4">Create your secure login account. This profile will have SUPER_ADMIN owner privileges with full system controls.</p>
+              <p className="text-xs text-muted-foreground mb-4">Create your secure login account. This profile will have SUPER_ADMIN owner privileges with full system controls.</p>
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
                   <label className={labelClass}>Owner Full Name *</label>
                   <div className="relative">
-                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground" />
                     <input
                       type="text"
                       value={ownerName}
@@ -417,7 +415,7 @@ export default function SetupPage() {
                 <div className="space-y-1.5">
                   <label className={labelClass}>Login Email Address *</label>
                   <div className="relative">
-                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground" />
                     <input
                       type="email"
                       value={ownerEmail}
@@ -432,7 +430,7 @@ export default function SetupPage() {
                   <div className="space-y-1.5">
                     <label className={labelClass}>Login Password *</label>
                     <div className="relative">
-                      <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                      <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground" />
                       <input
                         type="password"
                         value={ownerPassword}
@@ -445,7 +443,7 @@ export default function SetupPage() {
                   <div className="space-y-1.5">
                     <label className={labelClass}>Confirm Password *</label>
                     <div className="relative">
-                      <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-gray-500" />
+                      <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground" />
                       <input
                         type="password"
                         value={confirmPassword}
@@ -458,11 +456,11 @@ export default function SetupPage() {
                 </div>
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-white/5 mt-6">
+              <div className="flex justify-between pt-6 border-t border-border mt-6">
                 <button
                   type="button"
                   onClick={handlePrevStep}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-white/15 hover:bg-white/5 px-5 py-3 text-sm font-semibold text-gray-300 transition-colors"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-border hover:bg-accent px-5 py-3 text-sm font-semibold text-foreground transition-colors"
                 >
                   <ChevronLeft className="h-4 w-4" />
                   <span>Back</span>
@@ -470,7 +468,7 @@ export default function SetupPage() {
                 
                 <button
                   type="submit"
-                  className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 px-6 py-3 text-sm font-bold text-white shadow-lg transition-all"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 px-6 py-3 text-sm font-bold text-white shadow-lg transition-all"
                 >
                   <span>Build Lab & Database</span>
                   <ChevronRight className="h-4 w-4" />
@@ -487,24 +485,24 @@ export default function SetupPage() {
               className="flex flex-col items-center justify-center py-10 text-center space-y-6"
             >
               <div className="h-16 w-16 relative">
-                <div className="absolute inset-0 rounded-full border-4 border-white/10" />
-                <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+                <div className="absolute inset-0 rounded-full border-4 border-border" />
+                <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
               </div>
 
               <div className="space-y-2">
                 <h3 className="text-lg font-bold">Initializing Laboratory Database</h3>
-                <p className="text-xs text-gray-400 max-w-sm mx-auto">
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                   Creating pathology registers, initializing structural parameters, and seeding catalog of 200+ default tests. This will take a few moments...
                 </p>
               </div>
 
               {/* Progress Bar Animation */}
-              <div className="w-full max-w-xs bg-white/5 h-2 rounded-full overflow-hidden relative">
+              <div className="w-full max-w-xs bg-muted h-2 rounded-full overflow-hidden relative">
                 <motion.div 
                   initial={{ width: '0%' }}
                   animate={{ width: '95%' }}
                   transition={{ duration: 15, ease: 'easeOut' }}
-                  className="bg-blue-500 h-full rounded-full"
+                  className="bg-primary h-full rounded-full"
                 />
               </div>
             </motion.div>
@@ -517,44 +515,27 @@ export default function SetupPage() {
               animate={{ opacity: 1, scale: 1 }}
               className="flex flex-col items-center justify-center py-8 text-center space-y-6 animate-fade-in"
             >
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-500/10 text-green-500 border border-green-500/20 animate-bounce">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-500/10 text-green-600 border border-green-500/20">
                 <CheckCircle2 className="h-12 w-12" />
               </div>
 
               <div className="space-y-2">
-                <h2 className="text-2xl font-bold text-white">Lab Setup Complete!</h2>
-                <p className="text-xs text-gray-400 max-w-sm mx-auto">
+                <h2 className="text-2xl font-bold text-foreground">Lab Setup Complete!</h2>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                   Owner account successfully registered, lab profile configured, and test databases seeded. You are ready to open the LIS!
                 </p>
               </div>
 
               <button
                 onClick={() => router.push('/dashboard')}
-                className="w-full max-w-xs py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-sm font-bold text-white shadow-lg shadow-blue-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full max-w-xs py-3 rounded-xl bg-primary hover:bg-primary/90 text-sm font-bold text-white shadow-sm transition-colors"
               >
                 Launch Dashboard
               </button>
             </motion.div>
           )}
 
-      <style dangerouslySetInnerHTML={{__html: `
-        /* Overrides Chrome/Chromium autofill background and text color */
-        input:-webkit-autofill,
-        input:-webkit-autofill:hover, 
-        input:-webkit-autofill:focus,
-        input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 30px #181824 inset !important;
-          -webkit-text-fill-color: white !important;
-          caret-color: white !important;
-        }
-        
-        /* Overrides global input focus background-color to keep it dark on the setup page */
-        input:focus {
-          background-color: rgba(255, 255, 255, 0.04) !important;
-          color: white !important;
-          border-color: rgba(59, 130, 246, 0.5) !important;
-        }
-      `}} />
+
         </div>
       </div>
     </div>

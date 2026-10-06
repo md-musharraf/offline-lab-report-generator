@@ -352,6 +352,7 @@ export default function TestsPage() {
       container: form.container,
       isActive: true,
       parameters: form.parameters.map((p, pIdx) => ({
+        id: p.id, // keeps the parameter id so results already saved against it stay attached
         name: p.name,
         unit: p.unit || null,
         sortOrder: pIdx + 1,

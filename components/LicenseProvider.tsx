@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { KeyRound, Copy, Check, AlertCircle, Cpu, Calendar, Lock, Loader2, Sparkles, X } from 'lucide-react';
 
 interface LicenseContextType {
@@ -46,148 +46,118 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
     return typeof window !== 'undefined' && !!(window as any).electronAPI && !!(window as any).electronAPI.licenseCheck;
   };
 
+  // Admin-dashboard locks (pause/stop/delete) apply whenever the dashboard is reachable. When it is not
+  // (no internet) the lab keeps working on its local licence until it reconnects.
+  const REMOTE_LOCK = 'jharlab_remote_lock';
+  const REMOTE_REGISTERED = 'jharlab_remote_registered';
+  const renewedKey = useRef<string | null>(null);
+
+  const storage = {
+    get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k: string, v: string | null) => { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
+  };
+
+  const applyState = (valid: boolean, expiry: string | null, why: string | null) => {
+    setIsValid(valid);
+    setExpiryDate(expiry);
+    setReason(why);
+  };
+
+  const localLicense = async () => {
+    if (isElectron()) return (window as any).electronAPI.licenseCheck();
+    return (await fetch('/api/license/check')).json();
+  };
+
+  const remoteLicense = async (id: string): Promise<{ state: 'unreachable' } | { state: 'active'; licenseKey?: string; expiryDate?: string } | { state: 'locked'; reason: string }> => {
+    try {
+      const res = await fetch(`/api/license/remote-check?machineId=${encodeURIComponent(id)}`);
+      if (!res.ok) return { state: 'unreachable' };
+      const data = await res.json();
+      if (data.success) {
+        storage.set(REMOTE_REGISTERED, '1');
+        if (data.status === 'PAUSED') return { state: 'locked', reason: 'Your JharLab license is temporarily PAUSED by the administrator. Please contact support to resume access.' };
+        if (data.status === 'STOPPED') return { state: 'locked', reason: 'Your JharLab license has been STOPPED/REVOKED by the administrator. Software features are disabled.' };
+        return { state: 'active', licenseKey: data.licenseKey, expiryDate: data.expiryDate };
+      }
+      // A machine that was never registered (e.g. on a local trial) is not "deleted".
+      if (data.status === 'DELETED' && storage.get(REMOTE_REGISTERED)) {
+        return { state: 'locked', reason: 'Your JharLab license registration has been DELETED by the administrator. Please register the machine again.' };
+      }
+      return { state: 'unreachable' };
+    } catch {
+      return { state: 'unreachable' };
+    }
+  };
+
   const checkLicenseStatus = async () => {
     try {
-      let currentMachineId = 'UNKNOWN';
-      let offlineValidation = { valid: false, expiryDate: null, reason: 'License check in progress' };
-      
-      // 1. Perform instant local/offline validation
-      if (isElectron()) {
-        const data = await (window as any).electronAPI.licenseCheck();
-        currentMachineId = data.machineId || 'UNKNOWN';
-        offlineValidation = data;
-      } else {
-        const response = await fetch('/api/license/check');
-        const data = await response.json();
-        currentMachineId = data.machineId || 'UNKNOWN';
-        offlineValidation = data;
-      }
-      setMachineId(currentMachineId);
+      const local = await localLicense();
+      const id = local.machineId || 'UNKNOWN';
+      setMachineId(id);
 
-      // If valid offline, unlock the app instantly
-      if (offlineValidation.valid) {
-        setIsValid(true);
-        setExpiryDate(offlineValidation.expiryDate || null);
-        setReason(null);
+      // Unlock instantly from the local licence unless the dashboard locked us last time.
+      if (local.valid && !storage.get(REMOTE_LOCK)) {
+        applyState(true, local.expiryDate || null, null);
         setChecked(true);
       }
 
-      // 2. Perform online verification check in the background
-      fetch(`/api/license/remote-check?machineId=${encodeURIComponent(currentMachineId)}`)
-        .then(async (remoteRes) => {
-          if (remoteRes.ok) {
-            const remoteData = await remoteRes.json();
-            if (remoteData.success) {
-              const remoteStatus = remoteData.status;
-              
-              if (remoteStatus === 'PAUSED') {
-                setIsValid(false);
-                setReason('Your JharLab license is temporarily PAUSED by the administrator. Please contact support to resume access.');
-                return;
-              }
-              
-              if (remoteStatus === 'STOPPED') {
-                setIsValid(false);
-                setReason('Your JharLab license has been STOPPED/REVOKED by the administrator. Software features are disabled.');
-                return;
-              }
-
-              // Auto-renew: if active and we got a new license key from server, write it locally
-              if (remoteStatus === 'ACTIVE' && remoteData.licenseKey) {
-                if (isElectron()) {
-                  await (window as any).electronAPI.licenseActivate(remoteData.licenseKey);
-                } else {
-                  await fetch('/api/license/activate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ licenseKey: remoteData.licenseKey }),
-                  });
-                }
-              }
-              
-              // Maintain active state
-              setIsValid(true);
-              setExpiryDate(remoteData.expiryDate || offlineValidation.expiryDate || null);
-              setReason(null);
-            } else if (remoteData.status === 'DELETED') {
-              setIsValid(false);
-              setReason('Your JharLab license registration has been DELETED by the administrator. Please register the machine again.');
-            } else {
-              // Fallback to offline status if online fails
-              setIsValid(!!offlineValidation.valid);
-              setExpiryDate(offlineValidation.expiryDate || null);
-              setReason(offlineValidation.reason || null);
-            }
-          } else {
-            // Non-ok response (fallback to local database status)
-            setIsValid(!!offlineValidation.valid);
-            setExpiryDate(offlineValidation.expiryDate || null);
-            setReason(offlineValidation.reason || null);
-          }
-        })
-        .catch((remoteErr) => {
-          console.warn('Online license verification unreachable. Relying on offline check.', remoteErr);
-          // Fallback to local database status
-          setIsValid(!!offlineValidation.valid);
-          setExpiryDate(offlineValidation.expiryDate || null);
-          setReason(offlineValidation.reason || null);
-        })
-        .finally(() => {
-          setChecked(true);
-        });
-
+      const remote = await remoteLicense(id);
+      if (remote.state === 'locked') {
+        storage.set(REMOTE_LOCK, remote.reason);
+        applyState(false, null, remote.reason);
+      } else if (remote.state === 'active') {
+        // ACTIVE only means "not paused/stopped". The licence key still decides validity, so an expired
+        // subscription locks even when online; a key renewed on the dashboard is installed automatically.
+        storage.set(REMOTE_LOCK, null);
+        let lic = local;
+        let activationError: string | null = null;
+        if (remote.licenseKey && renewedKey.current !== remote.licenseKey) {
+          renewedKey.current = remote.licenseKey;
+          const res = isElectron()
+            ? await (window as any).electronAPI.licenseActivate(remote.licenseKey)
+            : await (await fetch('/api/license/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ licenseKey: remote.licenseKey }) })).json();
+          if (res?.success) lic = await localLicense();
+          else activationError = res?.error || null;
+        }
+        applyState(!!lic.valid, lic.expiryDate || null, lic.valid ? null : activationError || lic.reason || null);
+      } else {
+        storage.set(REMOTE_LOCK, null);
+        applyState(!!local.valid, local.expiryDate || null, local.reason || null);
+      }
     } catch (e) {
       console.error('Failed to check license:', e);
-      setIsValid(false);
-      setReason('Failed to connect to license validation service.');
+      applyState(false, null, 'Failed to connect to license validation service.');
+    } finally {
       setChecked(true);
     }
   };
 
   useEffect(() => {
     checkLicenseStatus();
-
-    // Periodic check every 15 seconds to lock/unlock in real-time
-    const interval = setInterval(() => {
-      checkLicenseStatus();
-    }, 15000);
-
+    // Re-check every 15 seconds so admin pause/resume takes effect quickly.
+    const interval = setInterval(checkLicenseStatus, 15000);
     return () => clearInterval(interval);
   }, []);
 
-  // Hook to check for software updates when license is active
+  // Check for software updates once the licence is active.
   useEffect(() => {
-    if (isValid) {
-      const checkUpdates = async () => {
-        try {
-          const res = await fetch('/api/updates/check');
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.update) {
-              const currentVersion = '1.0.0';
-              
-              // Semver comparison helper
-              const isVersionNewer = (curr: string, next: string) => {
-                const currParts = curr.split('.').map(Number);
-                const nextParts = next.split('.').map(Number);
-                for (let i = 0; i < 3; i++) {
-                  if ((nextParts[i] || 0) > (currParts[i] || 0)) return true;
-                  if ((nextParts[i] || 0) < (currParts[i] || 0)) return false;
-                }
-                return false;
-              };
-
-              if (isVersionNewer(currentVersion, data.update.version)) {
-                setUpdateInfo(data.update);
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Failed to check for software updates:', err);
+    if (!isValid) return;
+    const isVersionNewer = (curr: string, next: string) => {
+      const a = curr.split('.').map(Number);
+      const b = String(next).split('.').map(Number);
+      for (let i = 0; i < 3; i++) {
+        if ((b[i] || 0) !== (a[i] || 0)) return (b[i] || 0) > (a[i] || 0);
+      }
+      return false;
+    };
+    fetch('/api/updates/check')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.success && data.update && isVersionNewer(process.env.NEXT_PUBLIC_APP_VERSION || '0.0.0', data.update.version)) {
+          setUpdateInfo(data.update);
         }
-      };
-      checkUpdates();
-    }
+      })
+      .catch(err => console.warn('Failed to check for software updates:', err));
   }, [isValid]);
 
   // Hook to handle Electron auto-update IPC listeners
@@ -221,7 +191,8 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
       
       const res = await (window as any).electronAPI.downloadAndInstallUpdate(
         updateInfo.downloadUrl,
-        updateInfo.version
+        updateInfo.version,
+        updateInfo.sha256
       );
       
       if (res && res.success) {
@@ -328,9 +299,9 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
 
   if (!checked) {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-950 text-slate-200">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="mt-4 text-sm font-medium tracking-wide text-slate-400">Verifying LIS License status...</p>
+      <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Starting JharLab…</p>
       </div>
     );
   }
@@ -339,257 +310,175 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
     return (
       <LicenseContext.Provider value={{ machineId, expiryDate, isValid, triggerRecheck: checkLicenseStatus }}>
         {children}
-        
-        {/* Modern Toast Software Update Notification */}
+
         {updateInfo && (
-          <div className="fixed bottom-6 right-6 z-[9999] max-w-sm backdrop-blur-md bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-2xl animate-fade-in-up">
-            <div className="flex items-start justify-between">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+          <div role="status" className="fixed bottom-6 right-6 z-[9999] w-[360px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl animate-fade-in-up">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Sparkles className="h-5 w-5" />
               </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-semibold">Update available</h4>
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">v{updateInfo.version}</span>
+                  {updateInfo.isCritical && <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">Required</span>}
+                </div>
+                {updateInfo.title && <p className="mt-0.5 text-xs font-medium text-muted-foreground">{updateInfo.title}</p>}
+              </div>
               {!updateInfo.isCritical && updateStatus !== 'downloading' && updateStatus !== 'installing' && (
-                <button 
+                <button
+                  aria-label="Dismiss update"
                   onClick={() => {
                     setUpdateInfo(null);
                     setUpdateStatus('idle');
                     setDownloadProgress(null);
                     setUpdateErrorMessage(null);
                   }}
-                  className="text-slate-500 hover:text-slate-355 transition-colors cursor-pointer"
+                  className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
-            <div className="mt-3">
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-white text-sm">Update Available</h4>
-                <span className="font-mono text-[10px] bg-primary/10 border border-primary/25 text-primary px-1.5 py-0.5 rounded">
-                  v{updateInfo.version}
-                </span>
-                {updateInfo.isCritical && (
-                  <span className="text-[9px] font-black uppercase tracking-wider text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 rounded">
-                    Forced
-                  </span>
+
+            {updateStatus === 'idle' && updateInfo.releaseNotes && (
+              <p className="mt-3 max-h-32 overflow-y-auto whitespace-pre-line border-l-2 pl-3 text-xs leading-relaxed text-muted-foreground">{updateInfo.releaseNotes}</p>
+            )}
+
+            {(updateStatus === 'downloading' || updateStatus === 'installing') && (
+              <div className="mt-3 space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">{updateStatus === 'downloading' ? 'Downloading…' : 'Starting installer… JharLab will restart.'}</span>
+                  <span className="font-mono font-semibold text-primary">{downloadProgress ?? 0}%</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${downloadProgress ?? 0}%` }} />
+                </div>
+              </div>
+            )}
+
+            {updateStatus === 'error' && (
+              <div className="mt-3 flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{updateErrorMessage || 'The update could not be downloaded.'}</span>
+              </div>
+            )}
+
+            {(updateStatus === 'idle' || updateStatus === 'error') && (
+              <div className="mt-4 flex gap-2">
+                <a
+                  href={updateInfo.downloadUrl}
+                  onClick={handleDownloadUpdate}
+                  className="flex-1 rounded-lg bg-primary px-3 py-2 text-center text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  {updateStatus === 'error' ? 'Retry download' : 'Install update'}
+                </a>
+                {!updateInfo.isCritical && (
+                  <button
+                    onClick={() => (updateStatus === 'error' ? setUpdateStatus('idle') : setUpdateInfo(null))}
+                    className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-accent"
+                  >
+                    Later
+                  </button>
                 )}
               </div>
-              <p className="font-semibold text-slate-300 mt-1 text-xs">{updateInfo.title}</p>
-              
-              {updateStatus === 'idle' && (
-                <p className="text-[11px] text-slate-400 mt-2 leading-relaxed whitespace-pre-line border-l-2 border-slate-800 pl-2">
-                  {updateInfo.releaseNotes}
-                </p>
-              )}
-
-              {/* Progress and status UI */}
-              {(updateStatus === 'downloading' || updateStatus === 'installing') && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-slate-400 font-medium animate-pulse">
-                      {updateStatus === 'downloading' ? 'Downloading features...' : 'Preparing installer...'}
-                    </span>
-                    <span className="font-mono text-primary font-bold">{downloadProgress ?? 0}%</span>
-                  </div>
-                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-primary via-violet-500 to-indigo-500 rounded-full transition-all duration-300"
-                      style={{ width: `${downloadProgress ?? 0}%` }}
-                    />
-                  </div>
-                  <p className="text-[10px] text-slate-500 text-center">
-                    {updateStatus === 'downloading' ? 'Please keep the application open.' : 'The app will close to complete installation.'}
-                  </p>
-                </div>
-              )}
-
-              {updateStatus === 'error' && (
-                <div className="mt-3 rounded-lg border border-red-955/40 bg-red-955/15 p-2.5 text-xs text-red-400">
-                  <div className="flex gap-2">
-                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span>{updateErrorMessage || 'An error occurred during update.'}</span>
-                  </div>
-                </div>
-              )}
-
-              {updateStatus === 'idle' && (
-                <div className="mt-4 flex items-center gap-2">
-                  <a 
-                    href={updateInfo.downloadUrl} 
-                    onClick={handleDownloadUpdate}
-                    className="flex-1 bg-primary text-white text-xs font-bold py-2 px-3 rounded-lg text-center hover:brightness-110 active:scale-95 transition-all shadow-md shadow-primary/10"
-                  >
-                    Download Update
-                  </a>
-                  {!updateInfo.isCritical && (
-                    <button 
-                      onClick={() => setUpdateInfo(null)}
-                      className="bg-slate-800 text-slate-300 hover:bg-slate-750 text-xs font-semibold py-2 px-3 rounded-lg active:scale-95 transition-all cursor-pointer"
-                    >
-                      Dismiss
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {updateStatus === 'error' && (
-                <div className="mt-4 flex items-center gap-2">
-                  <button 
-                    onClick={handleDownloadUpdate}
-                    className="flex-1 bg-primary text-white text-xs font-bold py-2 px-3 rounded-lg text-center hover:brightness-110 active:scale-95 transition-all shadow-md shadow-primary/10"
-                  >
-                    Retry Download
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setUpdateStatus('idle');
-                      setDownloadProgress(null);
-                      setUpdateErrorMessage(null);
-                    }}
-                    className="bg-slate-800 text-slate-300 hover:bg-slate-750 text-xs font-semibold py-2 px-3 rounded-lg active:scale-95 transition-all cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         )}
       </LicenseContext.Provider>
     );
   }
 
-  // Render Premium Activation Lock Screen
+  // Activation / lock screen
   return (
-    <div className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-slate-950 px-4 font-sans text-slate-100 selection:bg-primary selection:text-white">
-      {/* Background Ambient Glows */}
-      <div className="absolute top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-blue-900/10 blur-[120px]" />
-      <div className="absolute bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-violet-900/10 blur-[120px]" />
-
-      <div className="z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40 backdrop-blur-xl shadow-2xl transition-all duration-300">
-        {/* Header Indicator */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-red-500 via-orange-500 to-amber-500" />
-        
+    <div className="min-h-screen w-full overflow-y-auto bg-background px-4 py-10 font-sans text-foreground">
+      <div className="mx-auto w-full max-w-lg overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="h-1 w-full bg-gradient-to-r from-amber-500 to-red-500" />
         <div className="p-8">
           <div className="flex flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-950/40 border border-red-800/40 text-red-500 shadow-inner mb-6">
-              <Lock className="h-8 w-8 animate-pulse" />
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+              <Lock className="h-6 w-6" />
             </div>
-            
-            <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Software Lock Active</h2>
-            <p className="mt-2 text-sm text-slate-400 max-w-md">
-              JharLab Laboratory Information System. The system has been locked by the administrator or the license has expired.
+            <h2 className="text-xl font-semibold tracking-tight">Activate JharLab</h2>
+            <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+              Enter your licence key, or start a free 7-day trial. Your lab data on this PC is safe either way.
             </p>
           </div>
 
-          {/* Machine ID Section */}
-          <div className="mt-8 rounded-xl border border-slate-850 bg-slate-950/60 p-4">
-            <div className="flex items-center justify-between text-xs text-slate-500 uppercase tracking-wider font-semibold mb-2">
-              <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5" /> Your Machine ID</span>
-              <span className="text-[10px] text-primary bg-primary/10 px-2 py-0.5 rounded-full">Offline Valid</span>
+          {reason && !error && !success && (
+            <div role="alert" className="mt-6 flex gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{reason}</span>
             </div>
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-800/60 bg-slate-900/40 px-3 py-2 text-sm font-mono text-slate-300">
-              <span className="truncate select-all">{machineId}</span>
+          )}
+
+          <div className="mt-6 rounded-lg border bg-muted/40 p-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Cpu className="h-3.5 w-3.5" /> Machine ID (send this to your administrator)
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 truncate font-mono text-sm select-all">{machineId}</code>
               <button
                 type="button"
                 onClick={handleCopyMachineId}
-                className="flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all cursor-pointer"
+                className="flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-xs font-medium hover:bg-accent"
               >
-                {copied ? (
-                  <>
-                    <Check className="h-3.5 w-3.5 text-green-500" />
-                    <span className="text-green-500">Copied</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="h-3.5 w-3.5" />
-                    <span>Copy</span>
-                  </>
-                )}
+                {copied ? <><Check className="h-3.5 w-3.5 text-green-600" /> Copied</> : <><Copy className="h-3.5 w-3.5" /> Copy</>}
               </button>
             </div>
-            <p className="mt-2 text-[11px] text-slate-550 leading-relaxed">
-              {reason || 'Send this ID to your administrator to generate or renew your subscription activation key.'}
-            </p>
           </div>
 
-          {/* Form Section */}
-          <form onSubmit={handleActivate} className="mt-6 space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="licenseKey" className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <KeyRound className="h-3.5 w-3.5" /> Enter License Key
-              </label>
-              <textarea
-                id="licenseKey"
-                rows={3}
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="Paste your subscription activation key here..."
-                disabled={submitting || success}
-                className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm font-mono text-slate-200 placeholder-slate-600 shadow-inner focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary transition-all disabled:opacity-50 resize-none"
-              />
-            </div>
-
-            {/* Notifications */}
-            {reason && !error && !success && (
-              <div className="flex gap-2.5 rounded-xl border border-red-950/40 bg-red-950/15 p-3 text-xs text-red-400">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>{reason}</span>
-              </div>
-            )}
+          <form onSubmit={handleActivate} className="mt-5 space-y-3">
+            <label htmlFor="licenseKey" className="flex items-center gap-1.5 text-sm font-medium">
+              <KeyRound className="h-4 w-4 text-muted-foreground" /> Licence key
+            </label>
+            <textarea
+              id="licenseKey"
+              rows={3}
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="Paste your activation key here"
+              disabled={submitting || success}
+              className="w-full resize-none rounded-lg border bg-background px-3 py-2.5 font-mono text-sm disabled:opacity-50"
+            />
 
             {error && (
-              <div className="flex gap-2.5 rounded-xl border border-red-950/40 bg-red-950/15 p-3 text-xs text-red-400">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div role="alert" className="flex gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
-
             {success && (
-              <div className="flex gap-2.5 rounded-xl border border-green-950/40 bg-green-950/15 p-3 text-xs text-green-400 animate-bounce">
-                <Check className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>License Key verified! Unlocking LIS dashboard...</span>
+              <div role="status" className="flex gap-2.5 rounded-lg border border-green-600/30 bg-green-600/10 p-3 text-sm text-green-700 dark:text-green-400">
+                <Check className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Activated. Opening JharLab…</span>
               </div>
             )}
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={submitting || success}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 px-4 py-3 text-sm font-bold text-white shadow-lg hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all cursor-pointer"
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Validating Key...</span>
-                </>
-              ) : (
-                <span>Activate License</span>
-              )}
+              {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Checking key…</> : 'Activate licence'}
             </button>
           </form>
 
-          <div className="relative my-6 flex items-center justify-center">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-800" />
-            </div>
-            <span className="relative bg-[#090d16] px-3 text-xs text-slate-500 uppercase tracking-widest">or</span>
+          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
           </div>
 
-          {/* Trial Activation Button */}
           <button
             type="button"
             onClick={handleStartTrial}
             disabled={submitting || success}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-850 bg-slate-900/60 hover:bg-slate-800 hover:text-white text-slate-300 px-4 py-3 text-sm font-bold transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer shadow-inner"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
           >
-            <Sparkles className="h-4.5 w-4.5 text-amber-500" />
+            <Sparkles className="h-4 w-4 text-amber-500" />
             Start 7-Day Free Trial
           </button>
 
-          {/* Footer Info */}
-          <div className="mt-8 pt-6 border-t border-slate-800/60 text-center text-xs text-slate-500">
-            JharLab © {new Date().getFullYear()}
-          </div>
+          <p className="mt-6 text-center text-xs text-muted-foreground">JharLab v{process.env.NEXT_PUBLIC_APP_VERSION} © {new Date().getFullYear()}</p>
         </div>
       </div>
     </div>

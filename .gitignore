@@ -5,3 +5,10 @@ build/
 out/
 *.exe
 *.dll.node*
+prisma/client/
+prisma/*.db*
+probe-out/
+test-results/
+playwright-report/
+.e2e-data/
+tsconfig.tsbuildinfo

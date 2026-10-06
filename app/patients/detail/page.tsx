@@ -1,169 +1,144 @@
 "use client";
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { AppLayout } from '@/components/AppLayout';
 import { db } from '@/lib/db';
-import Link from 'next/link';
-import { ArrowLeft, Plus, FileText, CreditCard } from 'lucide-react';
+import { Plus, FileText, CreditCard, Phone, Droplet, MapPin, CalendarDays, ChevronRight } from 'lucide-react';
+
+const STATUS_STYLES: Record<string, string> = {
+  PENDING: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  ENTERED: 'bg-primary/10 text-primary',
+  VERIFIED: 'bg-green-600/10 text-green-700 dark:text-green-400',
+  COMPLETED: 'bg-green-600/10 text-green-700 dark:text-green-400',
+};
 
 function PatientDetailContent() {
-  const searchParams = useSearchParams();
-  const id = searchParams.get('id') as string;
+  const id = useSearchParams().get('id') as string;
   const router = useRouter();
   const [patient, setPatient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadPatient() {
-      try {
-        const data = await db.query('patient', 'findUnique', {
-          where: { id },
-          include: {
-            orders: true,
-            bills: true
-          }
-        });
-        if (data) {
-          setPatient(data);
-        } else {
-          // not found
-        }
-      } catch (error) {
-        console.error("Failed to load patient", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    if (id) loadPatient();
+    if (!id) return;
+    db.query('patient', 'findUnique', {
+      where: { id },
+      include: {
+        orders: { include: { items: { include: { test: true } } }, orderBy: { createdAt: 'desc' } },
+        bills: { orderBy: { createdAt: 'desc' } },
+      },
+    })
+      .then(setPatient)
+      .catch(err => console.error('Failed to load patient', err))
+      .finally(() => setLoading(false));
   }, [id]);
 
-  if (loading) return <div className="p-6">Loading patient details...</div>;
-  if (!patient) return <div className="p-6">Patient not found</div>;
+  if (loading) return <div className="p-6 text-sm text-muted-foreground">Loading patient…</div>;
+  if (!patient) return <div className="p-6 text-sm text-muted-foreground">Patient not found.</div>;
+
+  const due = (patient.bills || []).reduce((sum: number, b: any) => sum + (b.dueAmount || 0), 0);
+  const facts = [
+    { icon: Phone, label: 'Mobile', value: patient.mobile || '—' },
+    { icon: Droplet, label: 'Blood group', value: patient.bloodGroup || '—' },
+    { icon: CalendarDays, label: 'Registered', value: new Date(patient.registeredAt).toLocaleString() },
+    { icon: MapPin, label: 'Address', value: patient.address || '—' },
+  ];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Link href="/patients" className="p-2 bg-white border rounded-md hover:bg-slate-50">
-            <ArrowLeft className="h-5 w-5 text-slate-600" />
-          </Link>
-          <h2 className="text-2xl font-bold text-slate-800">Patient Details</h2>
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border bg-card p-5 shadow-sm">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-xl font-bold text-primary">
+          {patient.name.charAt(0).toUpperCase()}
         </div>
-        <div className="flex space-x-3">
-          <button onClick={() => router.push(`/billing/new?patientId=${patient.id}`)} className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
-            New Test Order (Billing)
-          </button>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-xl font-semibold">{patient.name}</h2>
+            {patient.isEmergency && <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-bold text-destructive">EMERGENCY</span>}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-mono">{patient.id}</span> · {patient.age} {String(patient.ageUnit).toLowerCase()} · {patient.gender}
+            {patient.referredDoctor ? ` · Ref: ${patient.referredDoctor}` : ''}
+          </p>
         </div>
+        {due > 0 && (
+          <div className="ml-auto rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+            <div className="text-xs text-muted-foreground">Balance due</div>
+            <div className="font-semibold text-amber-700 dark:text-amber-400">₹{due.toLocaleString('en-IN')}</div>
+          </div>
+        )}
+        <button
+          onClick={() => router.push(`/billing/new?patientId=${encodeURIComponent(patient.id)}`)}
+          className={`${due > 0 ? '' : 'ml-auto '}inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90`}
+        >
+          <Plus className="h-4 w-4" /> New test order
+        </button>
       </div>
 
-      <div className="bg-white rounded-lg border shadow-sm p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="col-span-2 space-y-4">
-          <div className="flex items-center space-x-4">
-            <div className="h-16 w-16 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-2xl">
-              {patient.name.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">{patient.name}</h1>
-              <p className="text-sm text-gray-500 font-mono">{patient.id}</p>
-            </div>
-            {patient.isEmergency && (
-              <span className="ml-4 px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-bold animate-pulse">
-                EMERGENCY
-              </span>
-            )}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {facts.map(f => (
+          <div key={f.label} className="rounded-xl border bg-card p-4 shadow-sm">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><f.icon className="h-3.5 w-3.5" />{f.label}</div>
+            <div className="mt-1 truncate text-sm font-medium" title={f.value}>{f.value}</div>
           </div>
-          
-          <div className="grid grid-cols-2 gap-4 mt-6">
-            <div>
-              <p className="text-sm text-gray-500">Age / Gender</p>
-              <p className="font-medium">{patient.age} {patient.ageUnit} / {patient.gender}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Mobile</p>
-              <p className="font-medium">{patient.mobile}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Email</p>
-              <p className="font-medium">{patient.email || 'N/A'}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Blood Group</p>
-              <p className="font-medium">{patient.bloodGroup || 'N/A'}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="border-l pl-6 space-y-4">
-          <div>
-            <p className="text-sm text-gray-500">Registered On</p>
-            <p className="font-medium">{new Date(patient.registeredAt).toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Address</p>
-            <p className="font-medium">{patient.address || 'N/A'}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Emergency Contact</p>
-            <p className="font-medium">{patient.emergencyContact || 'N/A'}</p>
-          </div>
-        </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <h3 className="text-lg font-medium">Recent Orders</h3>
-            <FileText className="h-5 w-5 text-gray-400" />
-          </div>
-          <ul className="divide-y divide-gray-200">
-            {patient.orders?.length === 0 ? (
-              <li className="px-6 py-4 text-sm text-gray-500">No orders found.</li>
-            ) : (
-              patient.orders?.map((order: any) => (
-                <li key={order.id} className="px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/results/entry?orderId=${order.id}`)}>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-medium text-blue-600">{order.orderNo}</p>
-                      <p className="text-xs text-gray-500">{new Date(order.createdAt).toLocaleDateString()}</p>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <header className="flex items-center justify-between border-b px-5 py-3">
+            <h3 className="font-semibold">Orders</h3>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </header>
+          {patient.orders?.length ? (
+            <ul className="divide-y">
+              {patient.orders.map((order: any) => (
+                <li key={order.id}>
+                  <button
+                    onClick={() => router.push(`/results/entry?orderId=${order.id}`)}
+                    className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-accent"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-sm font-medium text-primary">{order.orderNo}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {new Date(order.createdAt).toLocaleDateString()} · {order.items?.map((i: any) => i.test?.shortName || i.test?.name).join(', ')}
+                      </p>
                     </div>
-                    <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
-                      {order.status}
-                    </span>
-                  </div>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLES[order.status] || 'bg-muted text-muted-foreground'}`}>{order.status}</span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </button>
                 </li>
-              ))
-            )}
-          </ul>
-        </div>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-5 py-6 text-sm text-muted-foreground">No orders yet.</p>
+          )}
+        </section>
 
-        <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b flex justify-between items-center">
-            <h3 className="text-lg font-medium">Billing History</h3>
-            <CreditCard className="h-5 w-5 text-gray-400" />
-          </div>
-          <ul className="divide-y divide-gray-200">
-            {patient.bills?.length === 0 ? (
-              <li className="px-6 py-4 text-sm text-gray-500">No bills found.</li>
-            ) : (
-              patient.bills?.map((bill: any) => (
-                <li key={bill.id} className="px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/billing/${bill.id}`)}>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{bill.billNo}</p>
-                      <p className="text-xs text-gray-500">{new Date(bill.createdAt).toLocaleDateString()}</p>
+        <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <header className="flex items-center justify-between border-b px-5 py-3">
+            <h3 className="font-semibold">Bills</h3>
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
+          </header>
+          {patient.bills?.length ? (
+            <ul className="divide-y">
+              {patient.bills.map((bill: any) => (
+                <li key={bill.id}>
+                  <button onClick={() => router.push('/billing')} className="flex w-full items-center gap-3 px-5 py-3 text-left transition-colors hover:bg-accent">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-mono text-sm font-medium">{bill.billNo}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(bill.createdAt).toLocaleDateString()}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-bold">₹{bill.totalAmount}</p>
-                      <span className={`text-xs ${bill.paymentStatus === 'PAID' ? 'text-green-600' : 'text-red-600'}`}>
-                        {bill.paymentStatus}
-                      </span>
+                      <p className="text-sm font-semibold">₹{Number(bill.totalAmount).toLocaleString('en-IN')}</p>
+                      <p className={`text-xs font-medium ${bill.paymentStatus === 'PAID' ? 'text-green-700 dark:text-green-400' : 'text-destructive'}`}>{bill.paymentStatus}</p>
                     </div>
-                  </div>
+                  </button>
                 </li>
-              ))
-            )}
-          </ul>
-        </div>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-5 py-6 text-sm text-muted-foreground">No bills yet.</p>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -171,8 +146,10 @@ function PatientDetailContent() {
 
 export default function PatientDetailPage() {
   return (
-    <Suspense fallback={<div className="p-6">Loading patient details...</div>}>
-      <PatientDetailContent />
-    </Suspense>
+    <AppLayout title="Patient" breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Patients', href: '/patients' }, { label: 'Details' }]}>
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading patient…</div>}>
+        <PatientDetailContent />
+      </Suspense>
+    </AppLayout>
   );
 }

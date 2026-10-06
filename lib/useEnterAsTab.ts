@@ -17,6 +17,8 @@ export function useEnterAsTab() {
 
       const target = e.target as HTMLElement;
       if (!target) return;
+      // Widgets that handle Enter themselves (e.g. the command palette) opt out.
+      if (target.closest('[data-enter-native]')) return;
 
       const tagName = target.tagName.toLowerCase();
 

@@ -691,39 +691,6 @@ export const db = {
       }
     }
 
-    // Intercept mutation commands when offline to queue for background sync
-    if (
-      typeof window !== 'undefined' &&
-      !window.navigator.onLine &&
-      (model === 'patient' || model === 'testOrder') &&
-      ['create', 'update', 'upsert'].includes(action) &&
-      result &&
-      result.id
-    ) {
-      try {
-        const unsyncedStr = localStorage.getItem('pathology_lab_unsynced_items') || '[]';
-        const unsynced = JSON.parse(unsyncedStr);
-        if (!unsynced.includes(result.id)) {
-          unsynced.push(result.id);
-          localStorage.setItem('pathology_lab_unsynced_items', JSON.stringify(unsynced));
-          
-          const logsStr = localStorage.getItem('pathology_lab_sync_logs') || '[]';
-          const logs = JSON.parse(logsStr);
-          logs.unshift({
-            id: Date.now() + Math.random().toString(),
-            timestamp: new Date().toISOString(),
-            message: `[Offline Mode] Cached ${model === 'patient' ? 'patient' : 'order'} ID "${result.id}" locally. Queued for background cloud sync.`
-          });
-          if (logs.length > 80) logs.pop();
-          localStorage.setItem('pathology_lab_sync_logs', JSON.stringify(logs));
-          
-          window.dispatchEvent(new Event('storage'));
-        }
-      } catch (e) {
-        console.error('Error queuing offline database sync item', e);
-      }
-    }
-
     return result;
   },
 };
