@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import { cn, getRoleAndPermissions } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { canOpen } from '@/lib/roles';
 import {
   LayoutDashboard, Users, FlaskConical, FileText, CreditCard,
   Settings, Package, Stethoscope, TestTubes,
@@ -73,67 +74,9 @@ export const navSections: NavSection[] = [
   },
 ];
 
-export function isItemAllowed(itemName: string, userRole: string | null): boolean {
-  if (!userRole) return false;
-  const { role, permissions } = getRoleAndPermissions(userRole);
-  const r = role.toUpperCase();
-  if (r === 'SUPER_ADMIN' || r === 'ADMIN') return true;
-
-  if (r === 'RECEPTIONIST') {
-    const allowed = [
-      'Dashboard',
-      'Quick Entry',
-      'Patients',
-      'Samples',
-      'Reports',
-      'Billing',
-      'Doctors',
-      'Home Collection',
-      'Outsource Labs',
-      'Tests Catalog',
-      'Contact Developer'
-    ];
-    if (permissions.includes('ACCESS_RESULTS')) {
-      allowed.push('Results Entry');
-    }
-    return allowed.includes(itemName);
-  }
-
-  if (r === 'TECHNICIAN') {
-    const allowed = [
-      'Dashboard',
-      'Quick Entry',
-      'Patients',
-      'Samples',
-      'Results Entry',
-      'Reports',
-      'Tests Catalog',
-      'Quality Control',
-      'Inventory',
-      'Machine Interfacing',
-      'Contact Developer'
-    ];
-    if (permissions.includes('ACCESS_BILLING')) {
-      allowed.push('Billing', 'Doctors');
-    }
-    return allowed.includes(itemName);
-  }
-
-  if (r === 'PATHOLOGIST') {
-    const allowed = [
-      'Dashboard',
-      'Patients',
-      'Samples',
-      'Results Entry',
-      'Reports',
-      'Tests Catalog',
-      'Quality Control',
-      'Contact Developer'
-    ];
-    return allowed.includes(itemName);
-  }
-
-  return false;
+// Screen access comes from lib/roles.js, the same rules the backend enforces.
+export function isItemAllowed(href: string, userRole: string | null): boolean {
+  return !!userRole && canOpen(userRole, href);
 }
 
 export function Sidebar() {
@@ -199,7 +142,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
         {navSections.map(section => ({
           ...section,
-          items: section.items.filter(item => isItemAllowed(item.name, role))
+          items: section.items.filter(item => isItemAllowed(item.href, role))
         })).filter(section => section.items.length > 0).map((section, sectionIdx) => (
           <div key={section.title}>
             {collapsed ? (

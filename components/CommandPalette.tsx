@@ -27,7 +27,7 @@ export function CommandPalette({ open, onClose, role }: { open: boolean; onClose
     const q = query.trim().toLowerCase();
     return navSections
       .flatMap(s => s.items)
-      .filter(i => isItemAllowed(i.name, role) && (!q || i.name.toLowerCase().includes(q)))
+      .filter(i => isItemAllowed(i.href, role) && (!q || i.name.toLowerCase().includes(q)))
       .slice(0, q ? 5 : 8)
       .map(i => ({ key: i.href, group: 'Go to', label: i.name, href: i.href, icon: i.icon, shortcut: i.shortcut }));
   }, [query, role]);

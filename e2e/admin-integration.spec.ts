@@ -61,7 +61,9 @@ test('licence lifecycle driven from the admin dashboard', async () => {
   test.setTimeout(300_000);
   const { app, page } = await launchApp('admin-integration', { NEXT_PUBLIC_ADMIN_DASHBOARD_URL: baseUrl });
   const licence = () => page.evaluate(() => (window as any).electronAPI.licenseCheck());
-  const unlocked = () => expect(page.getByText(/Laboratory Setup|Initialize your pathology/).first()).toBeVisible({ timeout: 40_000 });
+  const unlocked = () =>
+    expect(page.getByText(/Laboratory Setup|Initialize your pathology/).or(page.getByRole('heading', { name: 'Dashboard', exact: true })).first())
+      .toBeVisible({ timeout: 40_000 });
   try {
     // Registered lab: the key the dashboard generated (from a badly pasted machine ID) installs itself.
     await unlocked();
@@ -73,13 +75,27 @@ test('licence lifecycle driven from the admin dashboard', async () => {
     setCustomer({ status: 'ACTIVE' });
     await unlocked();
 
+    // The lab finishes setup, so the owner is signed in (the backend only accepts changes from a signed-in user).
+    await page.getByPlaceholder('e.g. Apex Diagnostics Lab').fill('E2E Lab');
+    await page.getByPlaceholder('e.g. 9876543210').fill('9000000000');
+    await page.getByPlaceholder(/1st Floor/).fill('Ranchi');
+    await page.getByRole('button', { name: /Owner Account Credentials/ }).click();
+    await page.getByPlaceholder('e.g. Dr. Ramesh Prasad').fill('Owner');
+    await page.getByPlaceholder('e.g. owner@lab.com').fill('owner@e2e.test');
+    await page.getByPlaceholder('••••••••').nth(0).fill('Owner@123');
+    await page.getByPlaceholder('••••••••').nth(1).fill('Owner@123');
+    await page.getByRole('button', { name: /Build Lab/ }).click();
+    await page.getByRole('button', { name: 'Launch Dashboard' }).click({ timeout: 60_000 });
+    await unlocked();
+
     setCustomer({ status: 'STOPPED' });
     await expect(lockText(page, /STOPPED\/REVOKED/)).toBeVisible({ timeout: 40_000 });
     setCustomer({ status: 'ACTIVE' });
     await unlocked();
 
     // Subscription lapsed: ACTIVE on the dashboard must not keep an expired key alive.
-    await page.evaluate(() => (window as any).electronAPI.dbQuery({ model: 'labSettings', action: 'update', args: { where: { id: 1 }, data: { licenseKey: null } } }));
+    const cleared = await page.evaluate(() => (window as any).electronAPI.dbQuery({ model: 'labSettings', action: 'update', args: { where: { id: 1 }, data: { licenseKey: null } } }));
+    expect(cleared.success, JSON.stringify(cleared)).toBe(true);
     setCustomer({ expiry_date: day(-2) });
     await expect(lockText(page, /expired/i)).toBeVisible({ timeout: 40_000 });
 

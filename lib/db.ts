@@ -642,55 +642,39 @@ async function mockQuery(model: string, action: string, args?: any): Promise<any
   return null;
 }
 
+// The backend says the session is gone (app restarted, signed out elsewhere): back to the sign-in screen.
+function handleSignedOut(message: string) {
+  if (typeof window !== 'undefined' && /sign in again/i.test(message) && !location.pathname.startsWith('/login')) {
+    localStorage.removeItem('pathology_lab_current_user');
+    location.href = '/login';
+  }
+}
+
 export const db = {
   query: async (model: string, action: string, args?: any) => {
-    let result;
     if (isElectron()) {
-      try {
-        const response = await (window as any).electronAPI.dbQuery({ model, action, args });
-        if (response && response.success) {
-          result = response.data;
-        } else {
-          console.error(`DB Error: ${response?.error}`);
-          throw new Error(response?.error || 'Unknown database error');
-        }
-      } catch (error) {
-        console.error('IPC DB query failed:', error);
-        throw error;
-      }
-    } else {
-      // Browser mode: query via Next.js API route first
-      try {
-        if (typeof window !== 'undefined') {
-          const response = await fetch('/api/db', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ model, action, args }),
-          });
-
-          if (response.ok) {
-            const resultData = await response.json();
-            if (resultData.success) {
-              result = resultData.data;
-            } else {
-              console.warn(`API DB Endpoint returned success=false: ${resultData.error}. Falling back to mock database (localStorage).`);
-              result = await mockQuery(model, action, args);
-            }
-          } else {
-            console.warn(`API DB Endpoint returned status ${response.status}. Falling back to mock database (localStorage).`);
-            result = await mockQuery(model, action, args);
-          }
-        } else {
-          result = await mockQuery(model, action, args);
-        }
-      } catch (error) {
-        console.warn('Failed to query server database via API endpoint. Falling back to mock database (localStorage). Error:', error);
-        result = await mockQuery(model, action, args);
-      }
+      const response = await (window as any).electronAPI.dbQuery({ model, action, args });
+      if (response?.success) return response.data;
+      handleSignedOut(response?.error || '');
+      throw new Error(response?.error || 'Unknown database error');
     }
 
-    return result;
+    // Plain browser (next dev): the API route. The localStorage mock is only a last resort when there is
+    // no backend at all; refused or failed queries must surface, never silently write somewhere else.
+    let response: Response;
+    try {
+      response = await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, action, args }),
+      });
+    } catch {
+      return mockQuery(model, action, args);
+    }
+    if (response.status === 404) return mockQuery(model, action, args);
+    const body = await response.json().catch(() => ({}));
+    if (response.ok && body.success) return body.data;
+    handleSignedOut(body.error || '');
+    throw new Error(body.error || `Database request failed (${response.status})`);
   },
 };

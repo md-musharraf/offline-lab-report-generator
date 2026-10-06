@@ -1,26 +1,18 @@
 "use client";
 import { Sidebar } from '@/components/Sidebar';
 import { CommandPalette } from '@/components/CommandPalette';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Moon, Sun, LogOut, ChevronRight, WifiOff, Send, ShieldAlert } from 'lucide-react';
 import { useEnterAsTab } from '@/lib/useEnterAsTab';
 import { useRouter, usePathname } from 'next/navigation';
-import { getRoleAndPermissions } from '@/lib/utils';
+import { canOpen, roleLabel } from '@/lib/roles';
 
 interface AppLayoutProps {
   children: React.ReactNode;
   title: string;
   breadcrumbs?: { label: string; href?: string }[];
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  SUPER_ADMIN: 'Super Admin',
-  ADMIN: 'Lab Owner',
-  RECEPTIONIST: 'Receptionist',
-  TECHNICIAN: 'Lab Technician',
-  PATHOLOGIST: 'Pathologist',
-};
 
 const SHORTCUTS: Record<string, string> = {
   F2: '/quick-register',
@@ -29,22 +21,6 @@ const SHORTCUTS: Record<string, string> = {
   F6: '/patients',
   F7: '/billing',
 };
-
-const ROLE_PATHS: Record<string, string[]> = {
-  RECEPTIONIST: ['/dashboard', '/quick-register', '/patients', '/samples', '/reports', '/billing', '/doctors', '/home-collection', '/outsource', '/tests', '/contact'],
-  TECHNICIAN: ['/dashboard', '/quick-register', '/patients', '/samples', '/results', '/reports', '/tests', '/quality-control', '/inventory', '/settings/machine', '/contact'],
-  PATHOLOGIST: ['/dashboard', '/patients', '/samples', '/results', '/reports', '/tests', '/quality-control', '/contact'],
-};
-
-function isPathAllowed(path: string, userRole: string): boolean {
-  const { role, permissions } = getRoleAndPermissions(userRole);
-  const r = role.toUpperCase();
-  if (r === 'SUPER_ADMIN' || r === 'ADMIN') return true;
-  const allowed = [...(ROLE_PATHS[r] || [])];
-  if (r === 'RECEPTIONIST' && permissions.includes('ACCESS_RESULTS')) allowed.push('/results');
-  if (r === 'TECHNICIAN' && permissions.includes('ACCESS_BILLING')) allowed.push('/billing');
-  return allowed.some(p => path === p || path.startsWith(p + '/'));
-}
 
 const readOutbox = (): any[] => {
   try {
@@ -64,6 +40,8 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
   const [outboxCount, setOutboxCount] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
+  const currentUserRole = useRef<string | null>(null);
+  currentUserRole.current = currentUser?.role || null;
 
   // Enter moves to the next field on every form.
   useEnterAsTab();
@@ -98,13 +76,22 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
       } catch (e) {
         console.error('Failed to check setup status:', e);
       }
-      try {
-        const user = JSON.parse(localStorage.getItem('pathology_lab_current_user') || 'null');
-        if (!user) router.push('/login');
-        else setCurrentUser(user);
-      } catch {
+      // The backend session is the source of truth; localStorage only remembers it for the screens.
+      const saved = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('pathology_lab_current_user') || 'null');
+        } catch {
+          return null;
+        }
+      })();
+      const me = await fetch('/api/auth/me').then(r => r.json()).catch(() => null);
+      const user = me?.user && saved?.id === me.user.id ? me.user : null;
+      if (!user) {
+        localStorage.removeItem('pathology_lab_current_user');
         router.push('/login');
+        return;
       }
+      setCurrentUser(user);
       setSessionLoading(false);
     };
     checkSession();
@@ -116,7 +103,7 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(o => !o);
-      } else if (SHORTCUTS[e.key] && !e.ctrlKey && !e.altKey) {
+      } else if (SHORTCUTS[e.key] && !e.ctrlKey && !e.altKey && canOpen(currentUserRole.current, SHORTCUTS[e.key])) {
         e.preventDefault();
         setPaletteOpen(false);
         router.push(SHORTCUTS[e.key]);
@@ -151,7 +138,8 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
     setOutboxCount(0);
   }, []);
 
-  const logout = () => {
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     localStorage.removeItem('pathology_lab_current_user');
     router.push('/login');
   };
@@ -167,8 +155,7 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
     );
   }
 
-  const role = getRoleAndPermissions(currentUser.role).role;
-  const allowed = isPathAllowed(pathname, currentUser.role);
+  const allowed = canOpen(currentUser.role, pathname);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -240,7 +227,7 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
               </div>
               <div className="hidden text-left leading-tight md:block">
                 <div className="max-w-[140px] truncate text-[13px] font-semibold text-foreground">{currentUser?.name || 'User'}</div>
-                <div className="text-[11px] text-muted-foreground">{ROLE_LABELS[role] || role || 'Staff'}</div>
+                <div className="text-[11px] text-muted-foreground">{roleLabel(currentUser.role)}</div>
               </div>
             </button>
             <AnimatePresence>

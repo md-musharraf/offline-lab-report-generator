@@ -3,8 +3,9 @@ const fs = require('fs');
 const { pathToFileURL } = require('url');
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
-const { app, BrowserWindow, ipcMain, protocol, net, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu } = require('electron');
 const api = require('./lib/server-api');
+const { can } = require('./lib/roles');
 const machineServer = require('./lib/machineServer');
 
 // JHARLAB_USER_DATA gives tests (and portable installs) an isolated profile + database.
@@ -29,23 +30,36 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow = null;
 let prisma = null;
 let dbError = null;
-const ctx = { prisma: null, dataDir: userData };
+let PrismaClient = null;
+let dbFile = null;
+// Shared by IPC and the app:// API: who is signed in, and a hook that tells the screens data changed.
+const ctx = {
+  prisma: null,
+  dataDir: userData,
+  session: null,
+  notify: model => mainWindow?.webContents.send('db-changed', model),
+};
+const allowed = action => can(ctx.session?.user?.role, action);
 
 async function initDatabase() {
   try {
     const clientDir = path.join(resourcesDir, 'prisma', 'client');
     const engine = fs.readdirSync(clientDir).find(f => f.startsWith('query_engine'));
     if (engine) process.env.PRISMA_QUERY_ENGINE_LIBRARY = path.join(clientDir, engine);
-    const { PrismaClient } = require(clientDir);
+    ({ PrismaClient } = require(clientDir));
 
     // Dev keeps using prisma/dev.db; installs and isolated profiles keep the database in userData.
     const useRepoDb = !app.isPackaged && !process.env.JHARLAB_USER_DATA;
-    const dbFile = useRepoDb ? path.join(__dirname, 'prisma', 'dev.db') : path.join(userData, 'dev.db');
+    dbFile = useRepoDb ? path.join(__dirname, 'prisma', 'dev.db') : path.join(userData, 'dev.db');
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
     prisma = new PrismaClient({ datasources: { db: { url: `file:${dbFile.replace(/\\/g, '/')}` } } });
     await api.ensureSchema(prisma, fs.readFileSync(path.join(resourcesDir, 'prisma', 'schema.sql'), 'utf8'));
     ctx.prisma = prisma;
     console.log('Database ready:', dbFile);
+    // Daily automatic backup (kept 14 days), checked at start-up and every 6 hours.
+    const backup = () => api.autoBackup(ctx).catch(err => console.error('Automatic backup failed:', err.message));
+    backup();
+    setInterval(backup, 6 * 3600e3).unref();
   } catch (err) {
     console.error('Database initialisation failed:', err);
     dbError = err.message || String(err);
@@ -68,6 +82,16 @@ function registerAppProtocol() {
   });
 }
 
+// `npm run electron:dev`: the window loads next dev, but /api/* is answered here too, so sign-in and the
+// database share one backend session exactly like the installed app.
+function routeDevApiToMain() {
+  protocol.handle('http', request => {
+    const url = new URL(request.url);
+    if (url.host === 'localhost:3000' && url.pathname.startsWith('/api/') && ctx.prisma) return api.handleRequest(ctx, request);
+    return net.fetch(request, { bypassCustomProtocolHandlers: true });
+  });
+}
+
 function openExternal(url) {
   if (/^(https?|mailto|tel):/i.test(url)) shell.openExternal(url);
 }
@@ -85,6 +109,7 @@ function createWindow() {
     icon: path.join(__dirname, serveStatic ? 'out' : 'public', 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      devTools: !app.isPackaged, // installed app: no DevTools for staff to poke at
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -140,7 +165,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     await initDatabase();
+    if (app.isPackaged) Menu.setApplicationMenu(null); // also removes the reload / inspect shortcuts
     if (serveStatic) registerAppProtocol();
+    else routeDevApiToMain();
     createWindow();
     machineServer.initMachineServer(prisma, () => mainWindow, userData);
     if (dbError) dialog.showErrorBox('JharLab could not open its database', dbError);
@@ -165,7 +192,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  machineServer.stopInterfacing();
+  machineServer.stopInterfacing({ remember: false });
   prisma?.$disconnect();
 });
 
@@ -179,10 +206,10 @@ ipcMain.handle('generate-qrcode', (_e, data) => api.reportQrPng(data));
 ipcMain.handle('db-query', async (_e, payload) => {
   if (!prisma) return dbUnavailable();
   try {
-    return { success: true, data: await api.dbQuery(prisma, payload) };
+    return { success: true, data: await api.dbQuery(prisma, payload, ctx) };
   } catch (error) {
-    console.error(`DB Error (${payload?.model}.${payload?.action}):`, error.message);
-    return { success: false, error: error.message };
+    if (!(error instanceof api.AccessError)) console.error(`DB Error (${payload?.model}.${payload?.action}):`, error.message);
+    return { success: false, error: error.message, code: error instanceof api.AccessError ? 'ACCESS' : undefined };
   }
 });
 
@@ -193,18 +220,75 @@ ipcMain.handle('license-check', async () => {
 ipcMain.handle('license-activate', (_e, licenseKey) => (prisma ? route('POST', 'license/activate', { licenseKey }) : dbUnavailable()));
 ipcMain.handle('license-request-trial', () => (prisma ? route('POST', 'license/trial') : dbUnavailable()));
 
+// Analyzer settings change only for roles allowed to change settings (owner, admin, technician).
+const denied = { success: false, error: 'Your role cannot change analyzer settings.' };
 ipcMain.handle('machine-get-config', () => machineServer.getConfig());
-ipcMain.handle('machine-save-config', (_e, config) => machineServer.saveConfig(config));
+ipcMain.handle('machine-save-config', (_e, config) => (allowed('settings') ? machineServer.saveConfig(config) : false));
 ipcMain.handle('machine-get-status', () => machineServer.getStatus());
-ipcMain.handle('machine-start', () => machineServer.startInterfacing());
-ipcMain.handle('machine-stop', () => machineServer.stopInterfacing());
+ipcMain.handle('machine-start', () => (allowed('settings') ? machineServer.startInterfacing() : false));
+ipcMain.handle('machine-stop', () => (allowed('settings') ? machineServer.stopInterfacing() : false));
 ipcMain.handle('machine-get-logs', () => machineServer.getLogs());
-ipcMain.handle('machine-clear-logs', () => machineServer.clearLogs());
-ipcMain.handle('machine-simulate', (_e, type) => machineServer.runSimulator(type));
+ipcMain.handle('machine-clear-logs', () => (allowed('settings') ? machineServer.clearLogs() : false));
+ipcMain.handle('machine-simulate', (_e, type) => (allowed('settings') ? machineServer.runSimulator(type) : false));
 ipcMain.handle('machine-list-ports', () => machineServer.listSerialPorts());
 ipcMain.handle('machine-get-orphans', () => machineServer.getOrphans());
-ipcMain.handle('machine-delete-orphan', (_e, id) => machineServer.deleteOrphan(id));
-ipcMain.handle('machine-reconcile-orphan', (_e, { orphanId, orderBarcode }) => machineServer.reconcileOrphan(orphanId, orderBarcode));
+ipcMain.handle('machine-delete-orphan', (_e, id) => (allowed('results') ? machineServer.deleteOrphan(id) : false));
+ipcMain.handle('machine-reconcile-orphan', (_e, { orphanId, orderBarcode }) => (allowed('results') ? machineServer.reconcileOrphan(orphanId, orderBarcode) : denied));
+
+// ==================== BACKUP FILES ====================
+// Save a copy anywhere (pendrive, another disk). JHARLAB_DOWNLOAD_DIR skips the dialog for E2E tests.
+ipcMain.handle('backup-export', async () => {
+  if (!allowed('backup:create')) return { success: false, error: 'Your role cannot export backups.' };
+  try {
+    const name = `JharLab-backup-${new Date().toISOString().slice(0, 10)}.db`;
+    let dest = process.env.JHARLAB_DOWNLOAD_DIR && path.join(process.env.JHARLAB_DOWNLOAD_DIR, name);
+    if (!dest) {
+      const r = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save a copy of the lab database',
+        defaultPath: path.join(app.getPath('documents'), name),
+        filters: [{ name: 'JharLab backup', extensions: ['db'] }],
+      });
+      if (r.canceled || !r.filePath) return { success: false, canceled: true };
+      dest = r.filePath;
+    }
+    const made = await api.createBackup(ctx, 'EXPORT', dest);
+    return { success: true, ...made };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('backup-open-folder', () => shell.openPath(path.join(userData, 'backups')));
+
+// Owner/admin only. Checks the file really is a JharLab database, saves a safety copy of today's data,
+// swaps the database file and restarts the app on it.
+ipcMain.handle('backup-restore', async (_e, file) => {
+  if (!allowed('backup:restore')) return { success: false, error: 'Only the lab owner or an admin can restore a backup.' };
+  try {
+    if (!file) {
+      const r = await dialog.showOpenDialog(mainWindow, {
+        title: 'Restore a JharLab backup',
+        defaultPath: path.join(userData, 'backups'),
+        filters: [{ name: 'JharLab backup', extensions: ['db'] }],
+        properties: ['openFile'],
+      });
+      if (r.canceled || !r.filePaths[0]) return { success: false, canceled: true };
+      file = r.filePaths[0];
+    }
+    await api.verifyBackupFile(file, PrismaClient);
+    const safety = await api.createBackup(ctx, 'SAFETY');
+    await api.dbQuery(prisma, { model: 'activityLog', action: 'create', args: { data: { userId: ctx.session.user.id, module: 'Backup', action: 'Restored backup', details: `${path.basename(file)} (safety copy ${path.basename(safety.file)})` } } }, ctx);
+    machineServer.stopInterfacing({ remember: false });
+    await prisma.$disconnect();
+    for (const ext of ['', '-wal', '-shm', '-journal']) fs.rmSync(dbFile + ext, { force: true });
+    fs.copyFileSync(file, dbFile);
+    if (!process.env.JHARLAB_NO_RELAUNCH) app.relaunch();
+    setTimeout(() => app.exit(0), 300);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
 // Downloads the installer published by the admin dashboard, verifies it when a sha256 is provided,
 // then runs it (NSIS one-click upgrades in place) and quits.

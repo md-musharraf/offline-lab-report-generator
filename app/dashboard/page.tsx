@@ -313,11 +313,19 @@ export default function DashboardPage() {
 
   const fetchDashboardData = async () => {
     try {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      weekAgo.setHours(0, 0, 0, 0);
+      const since = weekAgo < monthStart ? weekAgo : monthStart;
       const [patients, bills, payments, orders, results] = await Promise.all([
-        db.query('patient', 'findMany'),
-        db.query('bill', 'findMany', { include: { patient: true } }),
-        db.query('payment', 'findMany'),
+        db.query('patient', 'findMany', { where: { registeredAt: { gte: since } } }),
+        db.query('bill', 'findMany', { where: { OR: [{ createdAt: { gte: since } }, { dueAmount: { gt: 0 } }] }, include: { patient: true } }),
+        db.query('payment', 'findMany', { where: { paidAt: { gte: since } } }),
         db.query('testOrder', 'findMany', {
+          where: { OR: [{ createdAt: { gte: since } }, { status: { not: 'DELIVERED' } }] },
           include: {
             patient: true,
             items: {
@@ -330,7 +338,7 @@ export default function DashboardPage() {
           },
           orderBy: { createdAt: 'desc' }
         }),
-        db.query('testResult', 'findMany')
+        db.query('testResult', 'findMany', { where: { isCritical: true } })
       ]);
 
       const isToday = (dateInput: any) => {
@@ -532,8 +540,28 @@ export default function DashboardPage() {
     }
   };
 
+  const [staffToday, setStaffToday] = useState<any[]>([]);
+  const loadStaffToday = () =>
+    fetch('/api/dashboard/staff').then(r => r.json()).then(d => d.success && setStaffToday(d.rows)).catch(() => {});
+
   useEffect(() => {
     fetchDashboardData();
+    loadStaffToday();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        fetchDashboardData();
+        loadStaffToday();
+      }, 500);
+    };
+    const unsubscribe = (window as any).electronAPI?.onDbChanged?.(refresh);
+    const poll = setInterval(refresh, 60000);
+    return () => {
+      unsubscribe?.();
+      clearInterval(poll);
+      clearTimeout(timer);
+    };
   }, []);
 
   // SVG Chart calculation helper
@@ -577,7 +605,12 @@ export default function DashboardPage() {
         {/* Welcome and Quick Entry Banner */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-card border border-l-4 border-l-primary rounded-xl p-5 shadow-sm">
           <div>
-            <h2 className="text-base font-bold text-foreground">{getGreeting()} — Welcome to JharLab</h2>
+            <h2 className="flex items-center gap-2 text-base font-bold text-foreground">
+              {getGreeting()} — Welcome to JharLab
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-green-600/10 px-2 py-0.5 text-[11px] font-semibold text-green-700 dark:text-green-400" title="Updates by itself when anything changes">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-500" /> Live
+              </span>
+            </h2>
             <p className="text-xs text-muted-foreground">Offline diagnostics dashboard. Register patients, input values, and download reports instantly.</p>
           </div>
           <button 
@@ -588,6 +621,44 @@ export default function DashboardPage() {
             Quick Patient Entry & Results
           </button>
         </div>
+
+        {/* Shift summary: what each person did today (owner sees everyone, others see themselves) */}
+        {staffToday.length > 0 && (
+          <div className="overflow-hidden rounded-xl border bg-card shadow-sm" data-testid="shift-summary">
+            <div className="flex items-center justify-between border-b px-5 py-3">
+              <h3 className="text-sm font-semibold">{staffToday.length > 1 ? "Today's shift summary" : 'Your work today'}</h3>
+              <span className="text-xs text-muted-foreground">Cash handover, results and approvals per person</span>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-5 py-2 font-semibold">Staff</th>
+                  <th className="px-5 py-2 font-semibold">Shift</th>
+                  <th className="px-5 py-2 text-right font-semibold">Collected</th>
+                  <th className="px-5 py-2 text-right font-semibold">Results entered</th>
+                  <th className="px-5 py-2 text-right font-semibold">Reports approved</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {staffToday.map((r: any) => (
+                  <tr key={r.id} data-testid={`shift-row-${r.name}`}>
+                    <td className="px-5 py-2.5">
+                      <div className="font-medium">{r.name}{r.signedIn && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}</div>
+                      <div className="text-xs text-muted-foreground">{r.role}</div>
+                    </td>
+                    <td className="px-5 py-2.5 text-muted-foreground">
+                      {r.shift ? `${r.shiftStart || ''}–${r.shiftEnd || ''}` : '—'}
+                      {r.onDuty && <span className="ml-2 rounded-full bg-green-600/10 px-2 py-0.5 text-xs font-semibold text-green-700 dark:text-green-400">On duty</span>}
+                    </td>
+                    <td className="px-5 py-2.5 text-right font-semibold tabular-nums">₹{Number(r.collected).toLocaleString('en-IN')}</td>
+                    <td className="px-5 py-2.5 text-right tabular-nums">{r.results}</td>
+                    <td className="px-5 py-2.5 text-right tabular-nums">{r.approvals}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Quick Actions Center */}
         <div className="space-y-3">

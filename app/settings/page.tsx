@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 import { Building2, Printer, Palette, Bell, Shield, Database, Stethoscope, Wifi, Save, Plus, Trash2, XIcon, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
-import bcrypt from 'bcryptjs';
 
 function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
   let binary = '';
@@ -22,7 +21,7 @@ const settingsSections = [
   { id: 'print', name: 'Print Settings', icon: Printer, desc: 'Report header, footer, signature, stamp' },
   { id: 'theme', name: 'Appearance', icon: Palette, desc: 'Dark mode, colors, fonts' },
   { id: 'notify', name: 'Notifications', icon: Bell, desc: 'SMS, Email, WhatsApp gateway settings' },
-  { id: 'users', name: 'User Management', icon: Shield, desc: 'Users, roles, permissions' },
+  { id: 'users', name: 'Staff & Logins', icon: Shield, desc: 'Managed on the Staff screen' },
   { id: 'backup', name: 'Backup & Restore', icon: Database, desc: 'Auto backup schedule, restore' },
   { id: 'doctor', name: 'Doctor/Pathologist', icon: Stethoscope, desc: 'Signing authority, qualifications' },
   { id: 'analyzer', name: 'Analyzer Integration', icon: Wifi, desc: 'Serial port, baud rate, protocol' },
@@ -424,73 +423,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleAddUser = async () => {
-    if (!newUserName.trim() || !newUserEmail.trim()) {
-      setToast({ message: 'Please fill all fields', type: 'error' });
-      return;
-    }
-
-    try {
-      const roleMap: Record<string, string> = {
-        'Super Admin': 'SUPER_ADMIN',
-        'Pathologist': 'PATHOLOGIST',
-        'Technician': 'TECHNICIAN',
-        'Receptionist': 'RECEPTIONIST'
-      };
-
-      const hashedPassword = await bcrypt.hash('password123', 12);
-      const created = await db.query('user', 'create', {
-        data: {
-          name: newUserName,
-          email: newUserEmail,
-          password: hashedPassword,
-          role: roleMap[newUserRole] || 'TECHNICIAN',
-          isActive: true
-        }
-      });
-
-      if (created) {
-        setUsers(prev => [...prev, {
-          id: created.id,
-          name: created.name,
-          role: newUserRole,
-          email: created.email,
-          status: 'Active' as const,
-        }]);
-        setNewUserName('');
-        setNewUserRole('Technician');
-        setNewUserEmail('');
-        setShowAddUser(false);
-        setToast({ message: 'User added successfully!', type: 'success' });
-      }
-    } catch (err) {
-      console.error('Failed to add user:', err);
-      setToast({ message: 'Failed to create user in database.', type: 'error' });
-    }
-  };
-
-  const handleDeleteUser = async (id: number) => {
-    if (currentUser && currentUser.id === id) {
-      setToast({ message: 'Cannot delete yourself', type: 'error' });
-      return;
-    }
-
-    const userToDelete = users.find(u => u.id === id);
-    if (userToDelete && userToDelete.role === 'Super Admin') {
-      setToast({ message: 'Cannot delete a Super Admin user', type: 'error' });
-      return;
-    }
-
-    try {
-      await db.query('user', 'delete', { where: { id } });
-      setUsers(prev => prev.filter(u => u.id !== id));
-      setToast({ message: 'User removed successfully!', type: 'success' });
-    } catch (err) {
-      console.error('Failed to delete user:', err);
-      setToast({ message: 'Failed to remove user.', type: 'error' });
-    }
-  };
-
   const SaveButton = ({ section }: { section: string }) => (
     <div className="flex justify-end pt-2">
       <button 
@@ -736,55 +668,10 @@ export default function SettingsPage() {
             {/* ─── User Management ─── */}
             {activeSection === 'users' && (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-foreground">User Management</h3>
-                  <button 
-                    onClick={() => setShowAddUser(true)} 
-                    className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 btn-primary-glow transition-all"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Add User
-                  </button>
-                </div>
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
-                        <th className="px-4 py-3.5">Name</th>
-                        <th className="px-4 py-3.5">Email</th>
-                        <th className="px-4 py-3.5">Role</th>
-                        <th className="px-4 py-3.5">Status</th>
-                        <th className="px-4 py-3.5">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map(u => (
-                        <tr key={u.id} className="border-b hover:bg-accent/50">
-                          <td className="px-4 py-3.5 font-medium text-foreground">{u.name}</td>
-                          <td className="px-4 py-3.5 text-xs text-muted-foreground">{u.email}</td>
-                          <td className="px-4 py-3.5">
-                            <span className={`badge text-[11px] font-semibold ${roleColors[u.role] || 'bg-gray-100 text-gray-700'}`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className="text-xs font-semibold text-green-600 dark:text-green-400">
-                              {u.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <button 
-                              onClick={() => handleDeleteUser(u.id)} 
-                              className="btn-action rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-950/50 transition-colors"
-                              title="Delete user"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <h3 className="text-lg font-semibold text-foreground">Staff & Logins</h3>
+                <div className="rounded-xl border bg-muted/30 p-5">
+                  <p className="text-sm text-muted-foreground">Staff, their logins, roles and shifts are managed on the Staff screen (lab owner / admin only). Every login has its own password; nobody gets a shared default password.</p>
+                  <a href="/staff" className="mt-4 inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open Staff & Logins</a>
                 </div>
               </div>
             )}
@@ -793,26 +680,10 @@ export default function SettingsPage() {
             {activeSection === 'backup' && (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Backup & Restore</h3>
-                <div className="space-y-4">
-                  <div className="rounded-lg border p-4 space-y-3">
-                    <Toggle checked={autoBackup} onChange={setAutoBackup} label="Enable Auto Backup" />
-                    {autoBackup && (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Backup Time</label>
-                          <input type="time" value={backupTime} onChange={e => setBackupTime(e.target.value)}
-                            className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
-                        </div>
-                        <div>
-                          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Retention (days)</label>
-                          <input type="number" value={backupRetention} onChange={e => setBackupRetention(e.target.value)}
-                            className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                <div className="rounded-xl border bg-muted/30 p-5">
+                  <p className="text-sm text-muted-foreground">Backups are real copies of the lab database: one is made automatically every day, and you can back up now, save a copy to a pendrive, or restore from the Backup screen.</p>
+                  <a href="/backup" className="mt-4 inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open Backup</a>
                 </div>
-                <SaveButton section="Backup & Restore" />
               </div>
             )}
 
@@ -1044,44 +915,6 @@ export default function SettingsPage() {
           </motion.div>
         </div>
       </div>
-
-      {/* Add User Modal */}
-      {showAddUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddUser(false)}>
-          <div className="bg-card border rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">Add New User</h3>
-              <button onClick={() => setShowAddUser(false)} className="btn-action hover:bg-accent text-muted-foreground hover:text-foreground transition-all"><XIcon className="h-4 w-4" /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Full Name</label>
-                <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="Enter name..."
-                  className="mt-1 w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Email</label>
-                <input type="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="Enter email..."
-                  className="mt-1 w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Role</label>
-                <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)}
-                  className="mt-1 w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-                  <option>Super Admin</option>
-                  <option>Pathologist</option>
-                  <option>Technician</option>
-                  <option>Receptionist</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => setShowAddUser(false)} className="px-5 py-2.5 rounded-xl border text-sm font-bold text-foreground hover:bg-accent transition-all">Cancel</button>
-              <button onClick={handleAddUser} className="px-5 py-2.5 rounded-xl bg-primary text-sm font-bold text-primary-foreground hover:bg-primary/90 btn-primary-glow transition-all">Add User</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Toast Notification */}
       {toast && (

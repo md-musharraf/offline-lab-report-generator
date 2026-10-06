@@ -1,5 +1,6 @@
 "use client";
 import { AppLayout } from '@/components/AppLayout';
+import { can } from '@/lib/roles';
 import { motion } from 'framer-motion';
 import { FileText, Printer, MessageCircle, Mail, Download, Eye, CheckCircle, Search, XIcon } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -36,7 +37,7 @@ export default function ReportsPage() {
     }
   }, []);
 
-  const canApprove = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN' || currentUser?.role === 'PATHOLOGIST';
+  const canApprove = can(currentUser?.role, 'report:approve');
 
   const [search, setSearch] = useState('');
 

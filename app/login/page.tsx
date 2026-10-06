@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, Mail, ArrowRight, Activity, Shield, Users, FlaskConical, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { db } from '../../lib/db';
 import { useEnterAsTab } from '../../lib/useEnterAsTab';
-import bcrypt from 'bcryptjs';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -22,6 +21,7 @@ export default function LoginPage() {
   // Check setup status and clear session on load
   useEffect(() => {
     localStorage.removeItem('pathology_lab_current_user');
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
 
     async function checkSetup() {
       try {
@@ -87,145 +87,31 @@ export default function LoginPage() {
     setError(null);
   };
 
+  // Sign-in happens in the backend only: it checks the password, starts the session that every query is
+  // checked against, and never sends password hashes to the screen.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
       setError('Please fill in all fields');
       return;
     }
-
     setLoading(true);
     setError(null);
-
     try {
-      let apiError = null;
-
-      // 1. Try to authenticate via our API endpoint first (standard server-side Next.js environment)
-      try {
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email, password }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            localStorage.setItem('pathology_lab_current_user', JSON.stringify(data.user));
-            router.push('/dashboard');
-            return;
-          } else {
-            apiError = data.error || 'Invalid credentials';
-          }
-        } else {
-          try {
-            const data = await response.json();
-            apiError = data.error;
-          } catch (_) {}
-        }
-      } catch (apiErr) {
-        console.warn('API login failed or unavailable, falling back to local DB/IPC:', apiErr);
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        localStorage.setItem('pathology_lab_current_user', JSON.stringify(data.user));
+        router.push('/dashboard');
+        return;
       }
-
-      // 2. Local Database / Electron IPC Authentication (essential for offline desktop app in production)
-      try {
-        const users = await db.query('user', 'findMany', {
-          where: {
-            email: email.toLowerCase().trim(),
-            deletedAt: null
-          }
-        });
-
-        const user = users && users[0];
-
-        if (user && user.isActive) {
-          let isMatch = false;
-          let needsRehash = false;
-
-          try {
-            isMatch = await bcrypt.compare(password, user.password);
-          } catch (bcryptErr) {
-            console.warn('Bcrypt comparison failed, checking plain text:', bcryptErr);
-          }
-
-          // Plain-text legacy compatibility check
-          if (!isMatch && password === user.password) {
-            isMatch = true;
-            needsRehash = true;
-          }
-
-          if (isMatch) {
-            // Rehash plain text password on the fly to secure it
-            if (needsRehash) {
-              try {
-                const hashed = await bcrypt.hash(password, 12);
-                await db.query('user', 'update', {
-                  where: { id: user.id },
-                  data: { password: hashed }
-                });
-                console.log('Successfully migrated legacy plain-text password to hash for:', user.email);
-              } catch (rehashErr) {
-                console.error('Failed to rehash legacy password:', rehashErr);
-              }
-            }
-
-            // Update lastLogin
-            await db.query('user', 'update', {
-              where: { id: user.id },
-              data: { lastLogin: new Date() }
-            });
-
-            const authenticatedUser = {
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              role: user.role,
-              isActive: user.isActive
-            };
-
-            localStorage.setItem('pathology_lab_current_user', JSON.stringify(authenticatedUser));
-            router.push('/dashboard');
-            return;
-          }
-        }
-      } catch (dbErr) {
-        console.error('Local DB login query failed:', dbErr);
-      }
-
-      // 3. Fallback to hardcoded demo accounts (last line of defense) - Only in development mode
-      if (process.env.NODE_ENV === 'development') {
-        const matchingDemo = demoAccounts.find(
-          d => d.email.toLowerCase() === email.toLowerCase().trim() && d.pass === password
-        );
-
-        if (matchingDemo) {
-          const fallbackUser = {
-            id: matchingDemo.role.includes('Owner') ? 1 : matchingDemo.role.includes('Receptionist') ? 2 : 3,
-            name: matchingDemo.role.includes('Owner') 
-              ? 'Admin Owner' 
-              : matchingDemo.role.includes('Receptionist') 
-                ? 'Rahul Kumar (Receptionist)' 
-                : 'Dr. Amit Shah (Technician)',
-            email: matchingDemo.email,
-            role: matchingDemo.role.includes('Owner') 
-              ? 'SUPER_ADMIN' 
-              : matchingDemo.role.includes('Receptionist') 
-                ? 'RECEPTIONIST' 
-                : 'TECHNICIAN',
-            isActive: true
-          };
-          localStorage.setItem('pathology_lab_current_user', JSON.stringify(fallbackUser));
-          router.push('/dashboard');
-          return;
-        }
-      }
-
-      setError(apiError || 'Invalid email or password');
+      setError(data.error || 'Invalid email or password');
     } catch (err: any) {
-      console.error('System login error:', err);
-      setError(err.message || 'An error occurred during authentication.');
+      setError(err.message || 'Could not reach the lab database.');
     } finally {
       setLoading(false);
     }

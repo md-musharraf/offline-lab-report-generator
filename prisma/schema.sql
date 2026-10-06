@@ -262,6 +262,10 @@ CREATE TABLE "Staff" (
     "salary" REAL,
     "joinedAt" DATETIME,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "userId" INTEGER,
+    "shift" TEXT,
+    "shiftStart" TEXT,
+    "shiftEnd" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -358,8 +362,23 @@ CREATE TABLE "QcResult" (
     "date" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- CreateTable
+CREATE TABLE "Counter" (
+    "key" TEXT NOT NULL PRIMARY KEY,
+    "value" INTEGER NOT NULL
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE INDEX "Patient_name_idx" ON "Patient"("name");
+
+-- CreateIndex
+CREATE INDEX "Patient_mobile_idx" ON "Patient"("mobile");
+
+-- CreateIndex
+CREATE INDEX "Patient_registeredAt_idx" ON "Patient"("registeredAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TestCategory_name_key" ON "TestCategory"("name");
@@ -368,11 +387,62 @@ CREATE UNIQUE INDEX "TestCategory_name_key" ON "TestCategory"("name");
 CREATE UNIQUE INDEX "Test_code_key" ON "Test"("code");
 
 -- CreateIndex
+CREATE INDEX "TestParameter_testId_idx" ON "TestParameter"("testId");
+
+-- CreateIndex
+CREATE INDEX "ReferenceRange_parameterId_idx" ON "ReferenceRange"("parameterId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "TestOrder_orderNo_key" ON "TestOrder"("orderNo");
+
+-- CreateIndex
+CREATE INDEX "TestOrder_patientId_idx" ON "TestOrder"("patientId");
+
+-- CreateIndex
+CREATE INDEX "TestOrder_status_idx" ON "TestOrder"("status");
+
+-- CreateIndex
+CREATE INDEX "TestOrder_createdAt_idx" ON "TestOrder"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "TestOrderItem_orderId_idx" ON "TestOrderItem"("orderId");
+
+-- CreateIndex
+CREATE INDEX "TestResult_orderItemId_idx" ON "TestResult"("orderItemId");
+
+-- CreateIndex
+CREATE INDEX "TestResult_parameterId_idx" ON "TestResult"("parameterId");
+
+-- CreateIndex
+CREATE INDEX "TestResult_enteredBy_enteredAt_idx" ON "TestResult"("enteredBy", "enteredAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Bill_billNo_key" ON "Bill"("billNo");
 
 -- CreateIndex
+CREATE INDEX "Bill_patientId_idx" ON "Bill"("patientId");
+
+-- CreateIndex
+CREATE INDEX "Bill_createdAt_idx" ON "Bill"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "Payment_billId_idx" ON "Payment"("billId");
+
+-- CreateIndex
+CREATE INDEX "Payment_receivedBy_paidAt_idx" ON "Payment"("receivedBy", "paidAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Report_orderId_key" ON "Report"("orderId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Staff_userId_key" ON "Staff"("userId");
+
+-- CreateIndex
+CREATE INDEX "Attendance_staffId_date_idx" ON "Attendance"("staffId", "date");
+
+-- CreateIndex
+CREATE INDEX "ActivityLog_createdAt_idx" ON "ActivityLog"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "ActivityLog_userId_idx" ON "ActivityLog"("userId");
 

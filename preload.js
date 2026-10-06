@@ -5,6 +5,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateQrCode: (data) => ipcRenderer.invoke('generate-qrcode', data),
   // DB Methods via IPC
   dbQuery: (args) => ipcRenderer.invoke('db-query', args),
+  onDbChanged: (callback) => {
+    const listener = (event, model) => callback(model);
+    ipcRenderer.on('db-changed', listener);
+    return () => ipcRenderer.removeListener('db-changed', listener);
+  },
+  // Backup files
+  backupExport: () => ipcRenderer.invoke('backup-export'),
+  backupRestore: (file) => ipcRenderer.invoke('backup-restore', file),
+  backupOpenFolder: () => ipcRenderer.invoke('backup-open-folder'),
   // License Methods via IPC
   licenseCheck: () => ipcRenderer.invoke('license-check'),
   licenseActivate: (key) => ipcRenderer.invoke('license-activate', key),

@@ -2,9 +2,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, Mail, X, AlertCircle } from 'lucide-react';
-import { db } from '@/lib/db';
-import bcrypt from 'bcryptjs';
-import { getRoleAndPermissions } from '@/lib/utils';
 
 interface AdminOverrideModalProps {
   isOpen: boolean;
@@ -30,46 +27,21 @@ export function AdminOverrideModal({ isOpen, onClose, onSuccess, actionDescripti
     setError(null);
 
     try {
-      // 1. Try to query database for admin/owner
-      const users = await db.query('user', 'findMany', {
-        where: {
-          email: email.toLowerCase().trim(),
-          deletedAt: null
-        }
+      // Checked in the backend; password hashes never reach this screen.
+      const res = await fetch('/api/auth/verify-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, reason: actionDescription }),
       });
-
-      const user = users && users[0];
-
-      if (user && user.isActive) {
-        const { role } = getRoleAndPermissions(user.role);
-        const upperRole = role.toUpperCase();
-        
-        if (upperRole === 'SUPER_ADMIN' || upperRole === 'ADMIN') {
-          let isMatch = false;
-
-          try {
-            isMatch = await bcrypt.compare(password, user.password);
-          } catch (bcryptErr) {
-            console.warn('Bcrypt comparison failed, checking plain text:', bcryptErr);
-          }
-
-          // Plain-text legacy check
-          if (!isMatch && password === user.password) {
-            isMatch = true;
-          }
-
-          if (isMatch) {
-            setLoading(false);
-            setEmail('');
-            setPassword('');
-            onSuccess();
-            onClose();
-            return;
-          }
-        }
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setEmail('');
+        setPassword('');
+        onSuccess();
+        onClose();
+        return;
       }
-
-      setError('Invalid admin credentials or unauthorized account');
+      setError(data.error || 'Invalid admin credentials or unauthorized account');
     } catch (err: any) {
       console.error('Admin override validation failed:', err);
       setError(err.message || 'Verification failed. Please try again.');

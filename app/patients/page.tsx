@@ -7,6 +7,7 @@ import { formatCurrency, BLOOD_GROUPS, GENDER_OPTIONS } from '@/shared/constants
 import { db } from '@/lib/db';
 import { useRouter } from 'next/navigation';
 import { cn, getRoleAndPermissions } from '@/lib/utils';
+import { can } from '@/lib/roles';
 import { AdminOverrideModal } from '@/components/AdminOverrideModal';
 
 interface Patient {
@@ -45,8 +46,9 @@ export default function PatientsPage() {
 
   const { role, permissions } = getRoleAndPermissions(currentUser?.role);
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
-  const hasEditPermission = permissions.includes('EDIT_PATIENTS');
-  const hasDeletePermission = permissions.includes('DELETE_PATIENTS');
+  // Deleting patients is owner/admin only (lib/roles.js), with no override; the backend enforces it too.
+  const canDelete = can(currentUser?.role, 'patient:delete');
+  const hasEditPermission = permissions.includes('EDIT_PATIENTS') || can(currentUser?.role, 'register');
 
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideAction, setOverrideAction] = useState<'EDIT' | 'DELETE' | 'BULK_DELETE' | null>(null);
@@ -63,22 +65,11 @@ export default function PatientsPage() {
   };
 
   const handleDeleteClick = (p: Patient) => {
-    if (isAdmin || hasDeletePermission) {
-      setDeleteConfirm(p);
-    } else {
-      setOverrideAction('DELETE');
-      setOverrideTarget(p);
-      setOverrideOpen(true);
-    }
+    if (canDelete) setDeleteConfirm(p);
   };
 
   const handleBulkDeleteClick = () => {
-    if (isAdmin || hasDeletePermission) {
-      setShowBulkDeleteConfirm(true);
-    } else {
-      setOverrideAction('BULK_DELETE');
-      setOverrideOpen(true);
-    }
+    if (canDelete) setShowBulkDeleteConfirm(true);
   };
 
   const handleOverrideSuccess = () => {
@@ -336,34 +327,16 @@ export default function PatientsPage() {
     }
   };
 
+  // Patient IDs come from the backend counter: atomic, and never re-used after a delete.
   const generateNextId = async (): Promise<string> => {
-    const year = new Date().getFullYear();
-    try {
-      // Fetch all patients from DB to get accurate max sequence
-      const allPatients = await db.query('patient', 'findMany', {});
-      let maxSeq = 0;
-      if (allPatients && allPatients.length > 0) {
-        allPatients.forEach((p: any) => {
-          const parts = (p.id || '').split('-');
-          if (parts.length === 3) {
-            const seq = parseInt(parts[2], 10);
-            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-          }
-        });
-      }
-      return `LAB-${year}-${String(maxSeq + 1).padStart(5, '0')}`;
-    } catch {
-      // Fallback to UI state if DB query fails
-      let maxSeq = 0;
-      patients.forEach(p => {
-        const parts = p.id.split('-');
-        if (parts.length === 3) {
-          const seq = parseInt(parts[2], 10);
-          if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-        }
-      });
-      return `LAB-${year}-${String(maxSeq + 1).padStart(5, '0')}`;
-    }
+    const res = await fetch('/api/numbers/next', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'patient' }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Could not create a patient ID');
+    return data.number;
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -456,35 +429,15 @@ export default function PatientsPage() {
     }
   };
 
-  const deletePatientData = async (patientId: string) => {
-    const patientOrders = await db.query('testOrder', 'findMany', { where: { patientId } });
-    const patientBills = await db.query('bill', 'findMany', { where: { patientId } });
-
-    for (const order of (patientOrders || [])) {
-      const orderItems = await db.query('testOrderItem', 'findMany', { where: { orderId: order.id } });
-      for (const item of (orderItems || [])) {
-        const results = await db.query('testResult', 'findMany', { where: { orderItemId: item.id } });
-        for (const r of (results || [])) {
-          await db.query('testResult', 'delete', { where: { id: r.id } });
-        }
-        await db.query('testOrderItem', 'delete', { where: { id: item.id } });
-      }
-      const report = await db.query('report', 'findFirst', { where: { orderId: order.id } });
-      if (report) {
-        await db.query('report', 'delete', { where: { id: report.id } });
-      }
-      await db.query('testOrder', 'delete', { where: { id: order.id } });
-    }
-
-    for (const bill of (patientBills || [])) {
-      const payments = await db.query('payment', 'findMany', { where: { billId: bill.id } });
-      for (const py of (payments || [])) {
-        await db.query('payment', 'delete', { where: { id: py.id } });
-      }
-      await db.query('bill', 'delete', { where: { id: bill.id } });
-    }
-
-    await db.query('patient', 'delete', { where: { id: patientId } });
+  // One backend transaction: the patient with every order, result, report, bill and payment, plus an audit entry.
+  const deletePatientData = async (ids: string | string[]) => {
+    const res = await fetch('/api/patients/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ([] as string[]).concat(ids) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error || 'Delete failed');
   };
 
   const handleDelete = async () => {
@@ -612,7 +565,7 @@ export default function PatientsPage() {
             />
           </div>
           <div className="flex items-center gap-2">
-            {selectedPatientIds.length > 0 && (
+            {canDelete && selectedPatientIds.length > 0 && (
               <motion.button
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -756,13 +709,16 @@ export default function PatientsPage() {
                         >
                           <Edit className="h-4 w-4" />
                         </button>
-                        <button 
-                          onClick={() => handleDeleteClick(p)} 
-                          className={cn("btn-action border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400", !(isAdmin || hasDeletePermission) && "opacity-60")} 
-                          title={isAdmin || hasDeletePermission ? "Delete Patient" : "Delete Patient (Requires Override)"}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {canDelete && (
+                          <button
+                            onClick={() => handleDeleteClick(p)}
+                            className="btn-action border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400"
+                            title="Delete patient (owner/admin only)"
+                            aria-label={`Delete ${p.name}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </motion.tr>

@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { AppLayout } from '@/components/AppLayout';
+import { can } from '@/lib/roles';
 import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -34,7 +35,10 @@ function ResultEntryContent() {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideUnlocked, setOverrideUnlocked] = useState(false);
 
-  const isReadOnly = (order?.status === 'APPROVED' || order?.status === 'DELIVERED') && !isAdmin && !hasEditResultsAfterApproval && !overrideUnlocked;
+  // Approved results can be corrected by whoever may approve; delivered reports need the owner (or an override).
+  const canEditApproved = can(currentUser?.role, 'report:edit-approved');
+  const isReadOnly = !isAdmin && !hasEditResultsAfterApproval && !overrideUnlocked &&
+    (order?.status === 'DELIVERED' || (order?.status === 'APPROVED' && !canEditApproved));
 
 
   const [items, setItems] = useState<any[]>([]);

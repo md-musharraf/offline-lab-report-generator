@@ -3,6 +3,7 @@ import { AppLayout } from '@/components/AppLayout';
 import { motion } from 'framer-motion';
 import { Search, Download, Filter, User, Clock } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { db } from '@/lib/db';
 
 interface AuditLogEntry {
   id: number;
@@ -24,9 +25,10 @@ const moduleColors: Record<string, string> = {
   Reports: 'bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-400',
   Settings: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
   Backup: 'bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-400',
+  Staff: 'bg-teal-100 text-teal-700 dark:bg-teal-950/50 dark:text-teal-400',
 };
 
-const ALL_MODULES = ['Patients', 'Billing', 'Samples', 'Results', 'Reports', 'Settings', 'Backup'];
+const ALL_MODULES = ['Patients', 'Billing', 'Samples', 'Results', 'Reports', 'Settings', 'Backup', 'Staff'];
 
 /** Helper: parse dd/mm/yyyy to a Date object (midnight). */
 function parseDDMMYYYY(dateStr: string): Date | null {
@@ -64,6 +66,23 @@ export default function AuditLogPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    db.query('activityLog', 'findMany', { orderBy: { createdAt: 'desc' }, take: 2000, include: { user: { select: { name: true } } } })
+      .then((rows: any[]) => setLogs((rows || []).map(r => {
+        const d = new Date(r.createdAt);
+        return {
+          id: r.id,
+          user: r.user?.name || `User #${r.userId}`,
+          action: r.action,
+          module: r.module,
+          details: r.details || '',
+          time: d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          date: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+        };
+      })))
+      .catch(err => setToast({ message: err.message || 'Could not load the audit log', type: 'error' }));
+  }, []);
 
   useEffect(() => {
     if (toast) {
@@ -325,7 +344,7 @@ export default function AuditLogPage() {
                         <span className="font-medium text-foreground">{l.user}</span>
                       </div>
                     </td>
-                    <td className="font-medium text-foreground">{l.action}</td>
+                    <td className="whitespace-nowrap font-medium text-foreground">{l.action}</td>
                     <td>
                       <span className={`badge ${moduleColors[l.module]}`}>
                         {l.module}

@@ -2,11 +2,12 @@
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/db';
+import { nextNumber } from '@/lib/numbers';
 import { ArrowLeft, Search, Plus, Trash2, Receipt, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { AppLayout } from '@/components/AppLayout';
+import { can } from '@/lib/roles';
 import { motion, AnimatePresence } from 'framer-motion';
-import bcrypt from 'bcryptjs';
 
 
 function NewBillingPageContent() {
@@ -25,7 +26,8 @@ function NewBillingPageContent() {
     }
   }, []);
 
-  const isAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN';
+  // Discounts: owner, admin and technician; a receptionist needs the owner's password (every bill is audited).
+  const isAdmin = can(currentUser?.role, 'discount');
 
   // Manager Discount Authorization States
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -44,104 +46,21 @@ function NewBillingPageContent() {
     setAuthLoading(true);
     setAuthError(null);
     try {
-      let apiSuccess = false;
-      let apiUser = null;
-      let apiError = null;
-
-      // 1. Try to authenticate via API route
-      try {
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email: authEmail, password: authPassword }),
-        });
-        const data = await response.json();
-        if (response.ok && data.success) {
-          apiSuccess = true;
-          apiUser = data.user;
-        } else {
-          apiError = data.error || 'Invalid credentials';
-        }
-      } catch (apiErr) {
-        console.warn('Billing auth API failed, trying local DB:', apiErr);
+      const response = await fetch('/api/auth/verify-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail, password: authPassword, reason: 'discount unlock' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.success) {
+        setIsAuthorized(true);
+        setShowAuthModal(false);
+        setAuthEmail('');
+        setAuthPassword('');
+        setAuthError(null);
+        return;
       }
-
-      if (apiSuccess && apiUser) {
-        if (apiUser.role === 'SUPER_ADMIN' || apiUser.role === 'ADMIN') {
-          setIsAuthorized(true);
-          setShowAuthModal(false);
-          setAuthEmail('');
-          setAuthPassword('');
-          setAuthError(null);
-          alert('Discount controls unlocked successfully by Manager!');
-          return;
-        } else {
-          setAuthError('Authorized user must be an Admin/Owner');
-          return;
-        }
-      }
-
-      // 2. Local Database / Electron IPC Authentication (essential for offline/built app)
-      try {
-        const users = await db.query('user', 'findMany', {
-          where: {
-            email: authEmail.toLowerCase().trim(),
-            deletedAt: null
-          }
-        });
-
-        const user = users && users[0];
-
-        if (user && user.isActive && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN')) {
-          let isMatch = false;
-
-          try {
-            isMatch = await bcrypt.compare(authPassword, user.password);
-          } catch (bcryptErr) {
-            console.warn('Bcrypt comparison failed, checking plain text:', bcryptErr);
-          }
-
-          // Plain-text legacy compatibility check
-          if (!isMatch && authPassword === user.password) {
-            isMatch = true;
-          }
-
-          if (isMatch) {
-            setIsAuthorized(true);
-            setShowAuthModal(false);
-            setAuthEmail('');
-            setAuthPassword('');
-            setAuthError(null);
-            alert('Discount controls unlocked successfully by Manager!');
-            return;
-          }
-        }
-      } catch (dbErr) {
-        console.error('Local DB authorization query failed:', dbErr);
-      }
-
-      // 3. Fallback check for offline/demo environment credentials - ONLY in development mode
-      if (process.env.NODE_ENV === 'development') {
-        const demoAccounts = [
-          { role: 'Owner (Admin)', email: 'admin@lab.com', pass: 'Admin@123' },
-        ];
-        const match = demoAccounts.find(
-          d => d.email.toLowerCase() === authEmail.toLowerCase().trim() && d.pass === authPassword
-        );
-        if (match) {
-          setIsAuthorized(true);
-          setShowAuthModal(false);
-          setAuthEmail('');
-          setAuthPassword('');
-          setAuthError(null);
-          alert('Discount controls unlocked successfully by Manager (Fallback)!');
-          return;
-        }
-      }
-
-      setAuthError(apiError || 'Invalid credentials');
+      setAuthError(data.error || 'Authorized user must be an Admin/Owner');
     } catch (err) {
       console.error('Authorization exception:', err);
       setAuthError('An error occurred during authorization.');
@@ -399,21 +318,8 @@ function NewBillingPageContent() {
     
     setIsSubmitting(true);
     try {
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      
-      const billsToday = await db.query('bill', 'findMany', {
-        where: {
-          billNo: { contains: `LAB-BIL-${dateStr}` }
-        }
-      });
-      const billNo = `LAB-BIL-${dateStr}-${String((billsToday?.length || 0) + 1).padStart(4, '0')}`;
-
-      const ordersToday = await db.query('testOrder', 'findMany', {
-        where: {
-          orderNo: { contains: `LAB-ORD-${dateStr}` }
-        }
-      });
-      const orderNo = `LAB-ORD-${dateStr}-${String((ordersToday?.length || 0) + 1).padStart(4, '0')}`;
+      const billNo = await nextNumber('bill');
+      const orderNo = await nextNumber('order');
 
       // Calculate referral commission if patient has doctor
       let referralCommission = null;

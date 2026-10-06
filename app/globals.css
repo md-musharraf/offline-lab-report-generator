@@ -91,6 +91,7 @@
   }
 
   /* ═══ GLOBAL INPUT SIZING (makes ALL inputs bigger for technicians) ═══ */
+  input:not([type]),
   input[type="text"],
   input[type="number"],
   input[type="tel"],

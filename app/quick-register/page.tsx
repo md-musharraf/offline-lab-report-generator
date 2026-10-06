@@ -2,6 +2,7 @@
 import { useEffect, useState, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { db } from '@/lib/db';
+import { nextNumber } from '@/lib/numbers';
 import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { generateReportPDF, buildReportDataFromDb } from '@/lib/report-pdf';
@@ -594,11 +595,7 @@ function QuickRegisterContent() {
       } else {
         // 2. Generate new Patient ID
         const year = registerDate.getFullYear();
-        const countData = await db.query('patient', 'count', {
-          where: { id: { startsWith: `LAB-${year}` } }
-        });
-        const count = (countData as number) || 0;
-        const newId = `LAB-${year}-${String(count + 1).padStart(5, '0')}`;
+        const newId = await nextNumber('patient', date);
 
         // 3. Create Patient Record
         const newPatient = await db.query('patient', 'create', {
@@ -619,16 +616,8 @@ function QuickRegisterContent() {
       }
 
       // 3. Generate Bill No & Order No
-      const dateStr = date.replace(/-/g, '');
-      const billsToday = await db.query('bill', 'findMany', {
-        where: { billNo: { contains: `LAB-BIL-${dateStr}` } }
-      });
-      const billNo = `LAB-BIL-${dateStr}-${String((billsToday?.length || 0) + 1).padStart(4, '0')}`;
-
-      const ordersToday = await db.query('testOrder', 'findMany', {
-        where: { orderNo: { contains: `LAB-ORD-${dateStr}` } }
-      });
-      const orderNo = `LAB-ORD-${dateStr}-${String((ordersToday?.length || 0) + 1).padStart(4, '0')}`;
+      const billNo = await nextNumber('bill', date);
+      const orderNo = await nextNumber('order', date);
 
       // Calculate Doctor Referral Commission
       let referralCommission = null;

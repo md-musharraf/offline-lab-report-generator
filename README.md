@@ -72,3 +72,31 @@ How it fits together:
 
 Keyboard: `Ctrl+K` search · `F2` quick entry · `F3` results · `F4` reports · `F6` patients · `F7` billing ·
 `Enter` moves to the next field.
+
+### Roles, shifts and security
+
+Who may do what lives in `lib/roles.js` and is enforced by the backend (`lib/server-api.js`), not just hidden in
+the screens:
+
+| Role | Can | Cannot |
+|---|---|---|
+| Lab Owner / Admin | everything | — |
+| Lab Technician | registration, billing & payments, discounts, results, approving & printing reports, settings, machines, backups | delete patients/orders/bills, manage staff, restore a backup, read the audit log |
+| Pathologist / Doctor | results, approve and correct reports | billing, settings |
+| Receptionist (optional) | registration, billing, printing reports (results only if allowed) | results, approvals |
+| Phlebotomist | sample and home collection | everything else |
+
+- Staff, their logins and shifts (morning / evening / night / custom) are managed on **Staff & Logins**.
+- Every change is stamped with whoever is signed in (bills, payments, results, approvals) and written to the
+  **Audit Log**, which nobody can edit or delete. The dashboard's shift summary shows each person's cash,
+  results and approvals for the day, and updates live.
+- Each app launch starts at the sign-in screen; five wrong passwords lock sign-in for a minute. The installed
+  app has no DevTools or reload shortcuts.
+- Limitation: anyone with Windows access to `%APPDATA%\jharlab\dev.db` can still copy or edit the file directly.
+  Give staff a standard Windows account and keep the owner's account separate.
+
+### Backups
+
+A copy of the database is made automatically every day (14 kept in `%APPDATA%\jharlab\backups`), on demand from
+**Backup**, or saved to a pendrive / any folder. Restore (owner/admin only) checks the file, saves a safety copy of
+the current data first, then restarts on the restored data.

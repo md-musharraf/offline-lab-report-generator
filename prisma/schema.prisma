@@ -76,6 +76,10 @@ model Patient {
   deletedAt        DateTime?
   orders           TestOrder[]
   bills            Bill[]
+
+  @@index([name])
+  @@index([mobile])
+  @@index([registeredAt])
 }
 
 model TestCategory {
@@ -128,6 +132,8 @@ model TestParameter {
   refRanges       ReferenceRange[]
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  @@index([testId])
 }
 
 model ReferenceRange {
@@ -146,6 +152,8 @@ model ReferenceRange {
   interpretation String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([parameterId])
 }
 
 model TestOrder {
@@ -167,6 +175,10 @@ model TestOrder {
   updatedAt      DateTime      @updatedAt
   items          TestOrderItem[]
   report         Report?
+
+  @@index([patientId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model TestOrderItem {
@@ -182,6 +194,8 @@ model TestOrderItem {
   verifiedBy         Int?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
+
+  @@index([orderId])
 }
 
 model TestResult {
@@ -198,6 +212,10 @@ model TestResult {
   note            String?
   enteredAt       DateTime       @default(now())
   enteredBy       Int
+
+  @@index([orderItemId])
+  @@index([parameterId])
+  @@index([enteredBy, enteredAt])
 }
 
 model Bill {
@@ -222,6 +240,9 @@ model Bill {
   updatedAt       DateTime    @updatedAt
   orders          TestOrder[]
   payments        Payment[]
+
+  @@index([patientId])
+  @@index([createdAt])
 }
 
 model Payment {
@@ -233,6 +254,9 @@ model Payment {
   reference String?
   paidAt    DateTime @default(now())
   receivedBy Int
+
+  @@index([billId])
+  @@index([receivedBy, paidAt])
 }
 
 model Report {
@@ -271,6 +295,10 @@ model Staff {
   salary       Float?
   joinedAt     DateTime?
   isActive     Boolean  @default(true)
+  userId       Int?     @unique // login account (User.id), if this person can sign in
+  shift        String?  // MORNING | EVENING | NIGHT | FULL_DAY | CUSTOM
+  shiftStart   String?  // "08:00"
+  shiftEnd     String?  // "14:00"; may be earlier than start for night shifts
   attendance   Attendance[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -285,6 +313,8 @@ model Attendance {
   inTime    String?
   outTime   String?
   note      String?
+
+  @@index([staffId, date])
 }
 
 model InventoryItem {
@@ -337,6 +367,9 @@ model ActivityLog {
   details   String?
   ip        String?
   createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
 }
 
 model BackupLog {
@@ -363,3 +396,9 @@ model QcResult {
   date          DateTime @default(now())
 }
 
+
+// Atomic document numbers (patient IDs, order and bill numbers): "order:20261006" -> last issued sequence.
+model Counter {
+  key   String @id
+  value Int
+}

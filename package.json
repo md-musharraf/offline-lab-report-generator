@@ -1,6 +1,6 @@
 {
   "name": "jharlab",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "JharLab Laboratory Information System",
   "author": "Md Musharraf",
   "main": "main.js",
@@ -72,9 +72,8 @@
       "main.js",
       "preload.js",
       "package.json",
-      "lib/machineServer.js",
-      "lib/server-api.js",
-      "lib/default-tests.json",
+      "lib/*.js",
+      "lib/*.json",
       "out/**/*"
     ],
     "extraResources": [

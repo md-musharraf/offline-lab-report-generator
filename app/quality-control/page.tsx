@@ -62,72 +62,7 @@ export default function QualityControlPage() {
         orderBy: { date: 'desc' }
       });
       
-      // Auto-seed some beautiful QC data for Hemoglobin and WBC if database is empty
-      if (data && data.length === 0) {
-        const today = new Date();
-        const baseHgb = 13.5;
-        // 10 mock points for Hgb Level 1 (with one outlier for rule testing)
-        const hgbPoints = [13.4, 13.6, 13.5, 13.8, 13.3, 14.1, 13.5, 13.2, 13.6, 13.9];
-        
-        for (let i = 0; i < hgbPoints.length; i++) {
-          const date = new Date();
-          date.setDate(today.getDate() - (hgbPoints.length - 1 - i));
-          const valNum = hgbPoints[i];
-          const deviation = Number((valNum - baseHgb).toFixed(4));
-          const cv = Number(((Math.abs(deviation) / baseHgb) * 100).toFixed(2));
-          let status = 'PASS';
-          if (cv > 15) status = 'FAIL';
-          else if (cv >= 5) status = 'WARNING';
-
-          await db.query('qcResult', 'create', {
-            data: {
-              testName: 'CBC',
-              parameterName: 'Hemoglobin',
-              batchNumber: `QC-HGB-L1-0${i + 1}`,
-              level: 'Level 1',
-              expectedValue: baseHgb,
-              measuredValue: valNum,
-              deviation,
-              cv,
-              status,
-              date
-            }
-          });
-        }
-
-        // WBC points
-        const baseWbc = 7.5;
-        const wbcPoints = [7.4, 7.6, 7.3, 7.5, 8.2, 7.5, 7.4, 7.6, 7.2, 8.8]; // 8.8 will trigger 1_3s rule failure
-        for (let i = 0; i < wbcPoints.length; i++) {
-          const date = new Date();
-          date.setDate(today.getDate() - (wbcPoints.length - 1 - i));
-          const valNum = wbcPoints[i];
-          const deviation = Number((valNum - baseWbc).toFixed(4));
-          const cv = Number(((Math.abs(deviation) / baseWbc) * 100).toFixed(2));
-          let status = 'PASS';
-          if (cv > 15) status = 'FAIL';
-          else if (cv >= 5) status = 'WARNING';
-
-          await db.query('qcResult', 'create', {
-            data: {
-              testName: 'CBC',
-              parameterName: 'WBC',
-              batchNumber: `QC-WBC-L1-0${i + 1}`,
-              level: 'Level 1',
-              expectedValue: baseWbc,
-              measuredValue: valNum,
-              deviation,
-              cv,
-              status,
-              date
-            }
-          });
-        }
-        
-        data = await db.query('qcResult', 'findMany', {
-          orderBy: { date: 'desc' }
-        });
-      }
+      // Only real QC runs are shown: entered here or received from an analyzer (QC-/CONTROL- sample IDs).
 
       if (data) {
         const formatted: QCRecord[] = data.map((d: any) => ({
