@@ -33,6 +33,7 @@ model LabSettings {
   pathologyDoctorSignature Bytes?
   stamp            Bytes?
   printHeader      String?   // tagline under the lab name on reports
+  logoCaption      String?   // short line printed under the logo on reports
   nablNumber       String?
   // How reports print (applied at print time, also to old reports)
   printShowLogo    Boolean   @default(true)
@@ -41,6 +42,8 @@ model LabSettings {
   letterhead       Boolean   @default(false) // pre-printed paper: leave header/footer space blank
   letterheadTopMm  Int       @default(40)
   letterheadBottomMm Int     @default(20)
+  printColor       String    @default("#0e7490") // report accent colour
+  printFontSize    Int       @default(10)        // result table text size, pt
   // Who signs (frozen into each report when it is approved)
   coSigning        Boolean   @default(false)
   licenseKey       String?

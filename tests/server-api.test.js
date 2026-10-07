@@ -294,7 +294,7 @@ let frozenPid;
 test('approving freezes the report: later logo, address, signature, range, test, price and patient changes do not alter it', async () => {
   const logoA = await png('logo A');
   const sigA = await png('signature A');
-  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Ranchi', logo: logoA.toString('base64'), doctorName: 'Dr. A', doctorRegNo: 'JMC-1', signature: sigA, technicianName: 'Asha' } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Ranchi', logoCaption: 'Since 2001', mobile: '9000000000, 9111111111', logo: logoA.toString('base64'), doctorName: 'Dr. A', doctorRegNo: 'JMC-1', signature: sigA, technicianName: 'Asha' } });
   frozenPid = (await call(owner, 'POST', 'numbers/next', { kind: 'patient' })).json.number;
   await q(owner, 'patient', 'create', { data: { id: frozenPid, name: 'Suresh Mahto', age: 45, gender: 'MALE', mobile: '9000000001', createdBy: 1 } });
   const first = await orderWithResult(tech, frozenPid);
@@ -306,6 +306,9 @@ test('approving freezes the report: later logo, address, signature, range, test,
   const before = await api.loadReport(prisma, first.id);
   assert.equal(before.data.status, 'FINAL');
   assert.equal(before.data.lab.address, 'Ranchi');
+  assert.equal(before.data.lab.logoCaption, 'Since 2001');
+  assert.equal(before.data.lab.phone, '9000000000, 9111111111');
+  assert.equal(before.data.patient.mobile, '9000000001');
   assert.deepEqual(before.data.signatories.map(x => x.name), ['Asha', 'Dr. A']);
   assert.equal(hbRow(before.data).range, '13 - 17');
   assert.equal(hbRow(before.data).flag, 'L');
@@ -317,7 +320,7 @@ test('approving freezes the report: later logo, address, signature, range, test,
   const { cbc, hb } = await cbcWithHb();
   const params = cbc.parameters.map(x => (x.id === hb.id ? { ...x, refRanges: [{ gender: 'MALE', normalMin: 12, normalMax: 16 }] } : x));
   await q(owner, 'test', 'update', { where: { id: cbc.id }, data: { name: 'CBC (renamed)', price: 999, parameters: params } });
-  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Dumka', logo: (await png('logo B')).toString('base64'), doctorName: 'Dr. B', signature: await png('signature B') } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Dumka', logoCaption: 'New caption', logo: (await png('logo B')).toString('base64'), doctorName: 'Dr. B', signature: await png('signature B') } });
   await q(owner, 'patient', 'update', { where: { id: frozenPid }, data: { age: 46 } });
 
   // ...the approved report does not change,
@@ -403,18 +406,29 @@ test('nobody approves by writing the report row or plants a snapshot; approval n
 test('report PDFs survive odd characters, long reports, letterhead paper and damaged images', async () => {
   const { renderReports } = require('../lib/report-pdf');
   const { PDFDocument } = require('pdf-lib');
-  const rows = Array.from({ length: 80 }, (_, i) => ({ name: `Parameter ${i} ≤ ≥ µ ⁶ — मरीज़`, value: String(i), unit: '10⁶/µL', range: '≤ 5.0', flag: i % 3 ? null : 'H' }));
+  const flags = [null, 'H', 'L', 'C'];
+  const rows = Array.from({ length: 80 }, (_, i) => ({ name: `Parameter ${i} ≤ ≥ µ ⁶ — मरीज़`, value: String(i), unit: '10⁶/µL', range: '≤ 5.0', flag: flags[i % 4], dir: i % 8 === 3 ? 'L' : undefined }));
+  rows.push({ name: 'Smear', value: 'Within normal limits, no abnormal cells seen in the whole smear examined', unit: '', range: '' });
   const data = {
     status: 'FINAL', version: 1, orderNo: 'ORD-1', registeredAt: new Date().toISOString(),
-    lab: { name: 'Lab ₹', logo: 'bad' }, patient: { name: 'राम Kumar', age: '30 Years', gender: 'Male', id: 'P1', referredBy: 'Self' },
+    lab: { name: 'Lab ₹', logo: 'bad', logoCaption: 'Caption', phone: '1 / 2; 3, 4' }, patient: { name: 'राम Kumar', age: '30 Years', gender: 'Male', id: 'P1', referredBy: 'Self', mobile: '9000000001', address: 'Ward 4' },
     tests: [{ name: 'Panel', department: 'Biochemistry', rows: [{ name: 'Section', header: true }, ...rows] }],
     signatories: [{ role: 'Consultant Pathologist', name: 'Dr. X', image: 'bad' }],
   };
   const assets = { bad: Buffer.from('not an image') };
-  for (const opts of [{}, { letterhead: true, letterheadTopMm: 50, letterheadBottomMm: 25 }]) {
+  for (const opts of [{}, { letterhead: true, letterheadTopMm: 50, letterheadBottomMm: 25 }, { printColor: '#9f1239', printFontSize: 12 }, { printColor: 'nonsense', printFontSize: 'x' }]) {
     const doc = await PDFDocument.load(await renderReports([{ data, assets }], { ...opts, qrPng: () => png('x') }));
     assert.ok(doc.getPageCount() >= 2);
   }
+});
+
+test('a critical result keeps which way it is out of range, so the report can print ▲ or ▼', () => {
+  const { build } = require('../lib/report-data');
+  const param = { id: 1, name: 'Platelets', type: 'NUMERIC', sortOrder: 1, refRanges: [{ normalMin: 1.5, normalMax: 4.5 }] };
+  const rowFor = result => build({ orderNo: 'X', status: 'RESULT_ENTERED', patient: { age: 30, gender: 'MALE' }, items: [{ test: { name: 'T', parameters: [param] }, results: [{ parameterId: 1, ...result }] }] }).data.tests[0].rows[0];
+  assert.deepEqual([rowFor({ numericValue: 0.4, isCritical: true }).dir, rowFor({ numericValue: 9, flag: '!!' }).dir], ['L', 'H']);
+  assert.equal(rowFor({ numericValue: 3, isCritical: true }).dir, undefined);
+  assert.equal(rowFor({ numericValue: 9, flag: '↑' }).flag, 'H');
 });
 
 test('older data is upgraded on start-up: order prices filled in, analyzer orders reach Results and Reports', async () => {

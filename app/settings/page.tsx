@@ -60,6 +60,16 @@ const accentColors = [
   { name: 'Teal', value: '#14B8A6' },
 ];
 
+// Report accent colours: dark enough to print well on any printer.
+const reportColors = [
+  { name: 'Teal', value: '#0e7490' },
+  { name: 'Navy', value: '#1e3a8a' },
+  { name: 'Green', value: '#15803d' },
+  { name: 'Maroon', value: '#9f1239' },
+  { name: 'Purple', value: '#6b21a8' },
+  { name: 'Black', value: '#1f2937' },
+];
+
 interface UserEntry {
   id: number;
   name: string;
@@ -96,7 +106,8 @@ export default function SettingsPage() {
   const [logo, setLogo] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [labName, setLabName] = useState('');
-  const [labMobile, setLabMobile] = useState('');
+  const [labMobiles, setLabMobiles] = useState(['', '', '', '']); // up to four, saved comma separated
+  const [logoCaption, setLogoCaption] = useState('');
   const [labEmail, setLabEmail] = useState('');
   const [labWebsite, setLabWebsite] = useState('');
   const [labNabl, setLabNabl] = useState('');
@@ -113,6 +124,8 @@ export default function SettingsPage() {
   const [letterhead, setLetterhead] = useState(false);
   const [letterheadTopMm, setLetterheadTopMm] = useState(40);
   const [letterheadBottomMm, setLetterheadBottomMm] = useState(20);
+  const [printColor, setPrintColor] = useState('#0e7490');
+  const [printFontSize, setPrintFontSize] = useState(10);
 
   // Appearance state
   const [darkMode, setDarkMode] = useState(false);
@@ -177,7 +190,12 @@ export default function SettingsPage() {
       const profile = await db.query('labSettings', 'findFirst', { where: { id: 1 } });
       if (profile) {
         setLabName(profile.labName || '');
-        setLabMobile(profile.mobile || '');
+        // Older versions had one free-text number field; anything past the third number lands in the fourth box.
+        const nums = String(profile.mobile || '').split(/\s*[,;/|\n]+\s*/).filter(Boolean);
+        setLabMobiles([nums[0] || '', nums[1] || '', nums[2] || '', nums.slice(3).join(', ')]);
+        setLogoCaption(profile.logoCaption || '');
+        setPrintColor(profile.printColor || '#0e7490');
+        setPrintFontSize(profile.printFontSize || 10);
         setLabEmail(profile.email || '');
         setLabWebsite(profile.website || '');
         setLabAddress(profile.address || '');
@@ -303,7 +321,10 @@ export default function SettingsPage() {
         const updateData = {
           labName,
           address: labAddress,
-          mobile: labMobile,
+          mobile: labMobiles.map(m => m.trim()).filter(Boolean).join(', '),
+          logoCaption,
+          printColor,
+          printFontSize,
           email: labEmail,
           website: labWebsite,
           gstNumber: labGst,
@@ -499,15 +520,20 @@ export default function SettingsPage() {
                 <h3 className="text-lg font-semibold text-foreground">Lab Profile</h3>
                 <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">Changes here print on reports approved from now on. Reports already approved keep the details they were approved with.</p>
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
+                  <div className="col-span-2">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Lab Name</label>
                     <input type="text" value={labName} onChange={e => setLabName(e.target.value)}
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
-                  <div>
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mobile</label>
-                    <input type="text" value={labMobile} onChange={e => setLabMobile(e.target.value)}
-                      className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                  <div className="col-span-2">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mobile Numbers <span className="normal-case font-normal">(up to 4, all print on the report)</span></span>
+                    <div className="mt-1 grid grid-cols-4 gap-2">
+                      {labMobiles.map((m, i) => (
+                        <input key={i} type="tel" aria-label={`Mobile ${i + 1}`} placeholder={i === 0 ? 'Mobile 1' : `Mobile ${i + 1} (optional)`} value={m}
+                          onChange={e => setLabMobiles(prev => prev.map((v, j) => (j === i ? e.target.value : v)))}
+                          className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                      ))}
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Email</label>
@@ -571,6 +597,9 @@ export default function SettingsPage() {
                         <p className="text-xs text-muted-foreground">PNG or JPG, square or landscape, on a white or transparent background.</p>
                       </div>
                     </div>
+                    <label htmlFor="logo-caption" className="mt-4 text-xs font-bold text-muted-foreground uppercase tracking-wider block">Caption under the logo</label>
+                    <input id="logo-caption" type="text" maxLength={60} value={logoCaption} onChange={e => setLogoCaption(e.target.value)} placeholder="e.g. 24 Hour Emergency Service"
+                      className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
                 </div>
                 <SaveButton section="Lab Profile" />
@@ -593,6 +622,31 @@ export default function SettingsPage() {
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
                   <p className="text-xs text-muted-foreground">The tagline and footer note are frozen into each report when it is approved. The options below decide how any report prints, including old ones.</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border p-4">
+                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Report colour</span>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {reportColors.map(c => (
+                          <button key={c.value} type="button" onClick={() => setPrintColor(c.value)} aria-pressed={printColor === c.value}
+                            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${printColor === c.value ? 'ring-2 ring-primary border-primary' : 'hover:bg-accent'}`}>
+                            <span className="h-4 w-4 rounded-full" style={{ backgroundColor: c.value }} />
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="block rounded-lg border p-4">
+                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Result text size</span>
+                      <select value={printFontSize} onChange={e => setPrintFontSize(Number(e.target.value))}
+                        className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                        <option value={9}>Compact (fits more on a page)</option>
+                        <option value={10}>Normal</option>
+                        <option value={11}>Large</option>
+                        <option value={12}>Extra large</option>
+                      </select>
+                      <span className="mt-2 block text-xs text-muted-foreground">High results print with a red ▲, low with a blue ▼.</span>
+                    </label>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-3 rounded-lg border p-4">
                       <Toggle checked={printShowLogo} onChange={setPrintShowLogo} label="Show Lab Logo" />
