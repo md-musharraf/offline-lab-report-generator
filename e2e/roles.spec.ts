@@ -115,7 +115,7 @@ test.describe.serial('technician-run lab with owner control', () => {
     await expect(page.getByTestId('backup-row').first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Restore/ })).toHaveCount(0);
     await page.getByRole('button', { name: /Save a copy/ }).click();
-    const copy = path.join(dataDir, 'downloads', `JharLab-backup-${new Date().toISOString().slice(0, 10)}.db`);
+    const copy = path.join(dataDir, 'downloads', `JharLab-backup-${new Date().toLocaleDateString('en-CA')}.db`);
     await expect(page.getByText(/Copy saved to/)).toBeVisible(); // the app reports success once the copy is complete
     expect(fs.readFileSync(copy).subarray(0, 15).toString()).toBe('SQLite format 3');
   });

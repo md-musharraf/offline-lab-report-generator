@@ -70,6 +70,21 @@ const reportColors = [
   { name: 'Black', value: '#1f2937' },
 ];
 
+// Lab name fonts on the report (the PDF's built-in fonts, so they print the same on every PC).
+const nameFonts = [
+  { value: 'times', label: 'Classic (serif)', css: '"Times New Roman", Times, serif' },
+  { value: 'helvetica', label: 'Modern (sans)', css: 'Arial, Helvetica, sans-serif' },
+  { value: 'courier', label: 'Typewriter', css: '"Courier New", Courier, monospace' },
+];
+const nameSizes = [
+  { value: 18, label: 'Small' },
+  { value: 22, label: 'Medium' },
+  { value: 26, label: 'Normal' },
+  { value: 30, label: 'Large' },
+  { value: 34, label: 'Extra large' },
+  { value: 40, label: 'Huge' },
+];
+
 interface UserEntry {
   id: number;
   name: string;
@@ -105,6 +120,7 @@ export default function SettingsPage() {
   // Lab Profile state
   const [logo, setLogo] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoRight, setLogoRight] = useState<string | null>(null); // optional second logo, right of the name
   const [labName, setLabName] = useState('');
   const [labMobiles, setLabMobiles] = useState(['', '', '', '']); // up to four, saved comma separated
   const [logoCaption, setLogoCaption] = useState('');
@@ -126,6 +142,10 @@ export default function SettingsPage() {
   const [letterheadBottomMm, setLetterheadBottomMm] = useState(20);
   const [printColor, setPrintColor] = useState('#0e7490');
   const [printFontSize, setPrintFontSize] = useState(10);
+  const [printNameFont, setPrintNameFont] = useState('times');
+  const [printNameSize, setPrintNameSize] = useState(26);
+  const [printNameColor, setPrintNameColor] = useState(''); // '' = darker report colour
+  const [printPageBreak, setPrintPageBreak] = useState('continuous');
 
   // Appearance state
   const [darkMode, setDarkMode] = useState(false);
@@ -196,6 +216,10 @@ export default function SettingsPage() {
         setLogoCaption(profile.logoCaption || '');
         setPrintColor(profile.printColor || '#0e7490');
         setPrintFontSize(profile.printFontSize || 10);
+        setPrintNameFont(profile.printNameFont || 'times');
+        setPrintNameSize(profile.printNameSize || 26);
+        setPrintNameColor(profile.printNameColor || '');
+        setPrintPageBreak(profile.printPageBreak || 'continuous');
         setLabEmail(profile.email || '');
         setLabWebsite(profile.website || '');
         setLabAddress(profile.address || '');
@@ -245,6 +269,7 @@ export default function SettingsPage() {
           return null;
         };
 
+        setLogoRight(parseBufferToB64(profile.logoRight));
         if (profile.signature) {
           const sig = parseBufferToB64(profile.signature);
           setDoctorSignatureImage(sig);
@@ -325,6 +350,10 @@ export default function SettingsPage() {
           logoCaption,
           printColor,
           printFontSize,
+          printNameFont,
+          printNameSize,
+          printNameColor: printNameColor || null,
+          printPageBreak,
           email: labEmail,
           website: labWebsite,
           gstNumber: labGst,
@@ -349,6 +378,7 @@ export default function SettingsPage() {
           letterheadTopMm: Math.max(0, Math.min(120, Math.round(Number(letterheadTopMm) || 0))),
           letterheadBottomMm: Math.max(0, Math.min(80, Math.round(Number(letterheadBottomMm) || 0))),
           logo,
+          logoRight,
           signature: doctorSignatureImage,
           technicianSignature: technicianSignature,
           pathologyDoctorSignature: pathologyDoctorSignatureImage
@@ -391,12 +421,13 @@ export default function SettingsPage() {
     }
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>, side: 'left' | 'right' = 'left') => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
     try {
       const png = await shrinkImage(file, 600, 600);
+      if (side === 'right') return setLogoRight(png);
       setLogo(png);
       setLogoPreview(png);
     } catch (err: any) {
@@ -600,6 +631,23 @@ export default function SettingsPage() {
                     <label htmlFor="logo-caption" className="mt-4 text-xs font-bold text-muted-foreground uppercase tracking-wider block">Caption under the logo</label>
                     <input id="logo-caption" type="text" maxLength={60} value={logoCaption} onChange={e => setLogoCaption(e.target.value)} placeholder="e.g. 24 Hour Emergency Service"
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                    <span className="mt-4 text-xs font-bold text-muted-foreground uppercase tracking-wider block">Second logo, right side <span className="normal-case font-normal">(optional, e.g. NABL or a partner)</span></span>
+                    <div className="mt-2 flex items-center gap-4">
+                      {logoRight ? (
+                        <div className="h-16 w-16 border rounded-lg overflow-hidden bg-white flex items-center justify-center p-1 shadow-sm">
+                          <img src={logoRight} className="h-full w-full object-contain" alt="Right logo" />
+                        </div>
+                      ) : (
+                        <div className="h-16 w-16 border border-dashed border-muted-foreground/30 rounded-lg flex items-center justify-center text-muted-foreground text-xs text-center px-1">No Logo</div>
+                      )}
+                      <input type="file" accept="image/*" onChange={e => handleLogoUpload(e, 'right')} className="hidden" id="logo-right-upload-input" />
+                      <label htmlFor="logo-right-upload-input" className="cursor-pointer text-xs font-semibold border rounded-lg px-3 py-2 hover:bg-accent bg-background transition-colors">
+                        Upload Right Logo
+                      </label>
+                      {logoRight && (
+                        <button type="button" onClick={() => setLogoRight(null)} className="text-xs font-semibold text-red-500 hover:text-red-600 transition-colors">Remove</button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <SaveButton section="Lab Profile" />
@@ -622,6 +670,52 @@ export default function SettingsPage() {
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
                   <p className="text-xs text-muted-foreground">The tagline and footer note are frozen into each report when it is approved. The options below decide how any report prints, including old ones.</p>
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Lab name on the report</span>
+                    <div className="rounded-lg border bg-white px-3 py-4 text-center overflow-hidden">
+                      <span data-testid="name-preview" style={{ fontFamily: nameFonts.find(f => f.value === printNameFont)?.css, fontSize: `${printNameSize * 0.9}px`, color: printNameColor || printColor, filter: printNameColor ? undefined : 'brightness(0.62)', fontWeight: 700 }}>
+                        {(labName || 'Your Lab Name').toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <label className="block">
+                        <span className="text-xs text-muted-foreground">Font</span>
+                        <select aria-label="Lab name font" value={printNameFont} onChange={e => setPrintNameFont(e.target.value)}
+                          className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                          {nameFonts.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-xs text-muted-foreground">Size</span>
+                        <select aria-label="Lab name size" value={printNameSize} onChange={e => setPrintNameSize(Number(e.target.value))}
+                          className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                          {nameSizes.map(z => <option key={z.value} value={z.value}>{z.label}</option>)}
+                        </select>
+                      </label>
+                      <div>
+                        <span className="text-xs text-muted-foreground">Colour</span>
+                        <div className="mt-1 flex items-center gap-2">
+                          <input type="color" aria-label="Lab name colour" value={printNameColor || '#1f2937'} onChange={e => setPrintNameColor(e.target.value)}
+                            className="h-9 w-12 cursor-pointer rounded border bg-background" />
+                          <button type="button" onClick={() => setPrintNameColor('')} aria-pressed={!printNameColor}
+                            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${!printNameColor ? 'ring-2 ring-primary border-primary' : 'hover:bg-accent'}`}>
+                            Match report colour
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">The name is always centred. A long name shrinks, then goes onto two lines, so it is never cut off.</p>
+                  </div>
+                  <label className="block rounded-lg border p-4">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">When a patient has several tests</span>
+                    <select aria-label="When a patient has several tests" value={printPageBreak} onChange={e => setPrintPageBreak(e.target.value)}
+                      className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+                      <option value="continuous">All tests together (signatures on the last page)</option>
+                      <option value="department">Each department on a new page (signatures on every page)</option>
+                      <option value="test">Each test on a new page (signatures on every page)</option>
+                    </select>
+                    <span className="mt-2 block text-xs text-muted-foreground">A test is never split over two pages when it fits on one.</span>
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="rounded-lg border p-4">
                       <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Report colour</span>

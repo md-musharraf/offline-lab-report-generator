@@ -6,7 +6,9 @@ import path from 'path';
 import { launchApp, startTrialIfLocked } from './launch';
 
 const OWNER = { email: 'owner@lab.com', password: 'Owner@123' };
-const month = () => new Date().toISOString().slice(0, 7);
+// Local dates, like the app's file names (UTC is still yesterday before 5:30 AM IST).
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const month = () => today().slice(0, 7);
 const go = (page: Page, route: string) => page.evaluate(r => (window as any).next.router.push(r), route);
 
 async function pdfSaved(dataDir: string, name: string) {
@@ -76,7 +78,7 @@ test.describe.serial('record screens save on the PC', () => {
     await expect(row).toContainText('Low');
     await expect(page.getByTestId('stock-attention')).toHaveText('1');
     await page.getByRole('button', { name: 'PDF register' }).click();
-    await pdfSaved(dataDir, `stock-register-${new Date().toISOString().slice(0, 10)}.pdf`);
+    await pdfSaved(dataDir, `stock-register-${today()}.pdf`);
   });
 
   test('samples: a registered patient appears, gets collected and a barcode label prints', async () => {
@@ -121,7 +123,7 @@ test.describe.serial('record screens save on the PC', () => {
     await row.getByRole('button', { name: 'Collected' }).click();
     await expect(row).toContainText('Collected');
     await page.getByRole('button', { name: 'Run sheet PDF' }).click();
-    await pdfSaved(dataDir, `home-collection-${new Date().toISOString().slice(0, 10)}.pdf`);
+    await pdfSaved(dataDir, `home-collection-${today()}.pdf`);
   });
 
   test('outsourcing: add a partner lab, send a test, receive the result', async () => {

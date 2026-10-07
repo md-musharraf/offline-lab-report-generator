@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Plus, Edit, Search, ArrowDownToLine, ArrowUpFromLine, SlidersHorizontal, FileText, Archive } from 'lucide-react';
 import { db } from '@/lib/db';
 import { makeTablePdf, downloadPdf, rupees } from '@/lib/pdf-table';
-import { Field, Modal, ToastView, useToast, useLive, postApi, inputCls, btnPrimary, btnGhost, card, th, td, dateText } from '@/components/kit';
+import { Field, Modal, ToastView, useToast, useLive, postApi, inputCls, btnPrimary, btnGhost, card, th, td, dateText, todayInput } from '@/components/kit';
 
 // Reagents, tubes and consumables with stock in / out history, saved on this PC.
 
@@ -118,7 +118,7 @@ export default function InventoryPage() {
       columns: [{ header: 'Item', width: 26 }, { header: 'Category', width: 10 }, { header: 'In stock', width: 10, align: 'right' }, { header: 'Min', width: 7, align: 'right' }, { header: 'Status', width: 12 }, { header: 'Expiry', width: 11 }, { header: 'Batch', width: 10 }, { header: 'Supplier', width: 16 }],
       rows: shown.map(i => [i.name, i.category, `${i.currentStock} ${i.unit}`, i.minStock, status(i).label, i.expiryDate ? dateText(i.expiryDate) : '', i.batchNumber || '', i.supplierName || '']),
     });
-    downloadPdf(bytes, `stock-register-${new Date().toISOString().slice(0, 10)}.pdf`);
+    downloadPdf(bytes, `stock-register-${todayInput()}.pdf`);
   };
 
   const MoveBtn = ({ it, type, Icon, label }: { it: Item; type: 'IN' | 'OUT' | 'ADJUST'; Icon: React.ElementType; label: string }) => (

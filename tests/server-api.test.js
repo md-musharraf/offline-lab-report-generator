@@ -293,8 +293,9 @@ let frozenPid;
 
 test('approving freezes the report: later logo, address, signature, range, test, price and patient changes do not alter it', async () => {
   const logoA = await png('logo A');
+  const logoRightA = await png('right logo A');
   const sigA = await png('signature A');
-  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Ranchi', logoCaption: 'Since 2001', mobile: '9000000000, 9111111111', logo: logoA.toString('base64'), doctorName: 'Dr. A', doctorRegNo: 'JMC-1', signature: sigA, technicianName: 'Asha' } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Ranchi', logoCaption: 'Since 2001', mobile: '9000000000, 9111111111', logo: logoA.toString('base64'), logoRight: logoRightA.toString('base64'), doctorName: 'Dr. A', doctorRegNo: 'JMC-1', signature: sigA, technicianName: 'Asha' } });
   frozenPid = (await call(owner, 'POST', 'numbers/next', { kind: 'patient' })).json.number;
   await q(owner, 'patient', 'create', { data: { id: frozenPid, name: 'Suresh Mahto', age: 45, gender: 'MALE', mobile: '9000000001', createdBy: 1 } });
   const first = await orderWithResult(tech, frozenPid);
@@ -315,12 +316,13 @@ test('approving freezes the report: later logo, address, signature, range, test,
   assert.equal(before.data.patient.age, '45 Years');
   assert.ok(before.data.reportedAt, 'report date is the approval time');
   assert.ok(before.assets[before.data.lab.logo].equals(logoA), 'logo stored with the report');
+  assert.ok(before.assets[before.data.lab.logoRight].equals(logoRightA), 'second logo stored with the report');
 
   // The lab changes everything...
   const { cbc, hb } = await cbcWithHb();
   const params = cbc.parameters.map(x => (x.id === hb.id ? { ...x, refRanges: [{ gender: 'MALE', normalMin: 12, normalMax: 16 }] } : x));
   await q(owner, 'test', 'update', { where: { id: cbc.id }, data: { name: 'CBC (renamed)', price: 999, parameters: params } });
-  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Dumka', logoCaption: 'New caption', logo: (await png('logo B')).toString('base64'), doctorName: 'Dr. B', signature: await png('signature B') } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Dumka', logoCaption: 'New caption', logoRight: null, logo: (await png('logo B')).toString('base64'), doctorName: 'Dr. B', signature: await png('signature B') } });
   await q(owner, 'patient', 'update', { where: { id: frozenPid }, data: { age: 46 } });
 
   // ...the approved report does not change,
@@ -338,7 +340,7 @@ test('approving freezes the report: later logo, address, signature, range, test,
   assert.equal(next.tests[0].name, 'CBC (renamed)');
   assert.equal(hbRow(next).range, '12 - 16');
   assert.equal(next.patient.age, '46 Years');
-  assert.equal(await prisma.reportAsset.count(), 4, 'each distinct image stored once');
+  assert.equal(await prisma.reportAsset.count(), 5, 'each distinct image stored once (logos A, B, right logo A, signatures A, B)');
 
   // Both print in one PDF; printing counts, previews do not.
   const pdf = await call(tech, 'POST', 'reports/pdf', { orderIds: [first.id, second.id] });
@@ -411,15 +413,31 @@ test('report PDFs survive odd characters, long reports, letterhead paper and dam
   rows.push({ name: 'Smear', value: 'Within normal limits, no abnormal cells seen in the whole smear examined', unit: '', range: '' });
   const data = {
     status: 'FINAL', version: 1, orderNo: 'ORD-1', registeredAt: new Date().toISOString(),
-    lab: { name: 'Lab ₹', logo: 'bad', logoCaption: 'Caption', phone: '1 / 2; 3, 4' }, patient: { name: 'राम Kumar', age: '30 Years', gender: 'Male', id: 'P1', referredBy: 'Self', mobile: '9000000001', address: 'Ward 4' },
+    lab: { name: 'A Very Long Laboratory Name That Has To Shrink And Wrap Onto Two Lines ₹', logo: 'bad', logoRight: 'bad', logoCaption: 'Caption', phone: '1 / 2; 3, 4' }, patient: { name: 'राम Kumar', age: '30 Years', gender: 'Male', id: 'P1', referredBy: 'Self', mobile: '9000000001', address: 'Ward 4' },
     tests: [{ name: 'Panel', department: 'Biochemistry', rows: [{ name: 'Section', header: true }, ...rows] }],
     signatories: [{ role: 'Consultant Pathologist', name: 'Dr. X', image: 'bad' }],
   };
   const assets = { bad: Buffer.from('not an image') };
-  for (const opts of [{}, { letterhead: true, letterheadTopMm: 50, letterheadBottomMm: 25 }, { printColor: '#9f1239', printFontSize: 12 }, { printColor: 'nonsense', printFontSize: 'x' }]) {
+  for (const opts of [{}, { letterhead: true, letterheadTopMm: 50, letterheadBottomMm: 25 }, { printColor: '#9f1239', printFontSize: 12 }, { printColor: 'nonsense', printFontSize: 'x' },
+    { printPageBreak: 'test', printNameFont: 'courier', printNameSize: 40, printNameColor: '#123456' },
+    { printPageBreak: 'department', printNameFont: 'nonsense', printNameSize: 'x', printNameColor: 'red' }]) {
     const doc = await PDFDocument.load(await renderReports([{ data, assets }], { ...opts, qrPng: () => png('x') }));
     assert.ok(doc.getPageCount() >= 2);
   }
+});
+
+test('a patient with several tests: together, a page per test, and a test that fits is never split', async () => {
+  const { renderReports } = require('../lib/report-pdf');
+  const { PDFDocument } = require('pdf-lib');
+  const rows = n => Array.from({ length: n }, (_, i) => ({ name: `Row ${i}`, value: '1', unit: 'mg/dL', range: '0 - 2' }));
+  const report = tests => ({ data: { status: 'FINAL', version: 1, orderNo: 'ORD-9', lab: { name: 'Lab' }, patient: { name: 'P' }, tests, signatories: [] }, assets: {} });
+  const pages = async (tests, opts = {}) => (await PDFDocument.load(await renderReports([report(tests)], opts))).getPageCount();
+  const small = [{ name: 'CBC', department: 'Hematology', rows: rows(5) }, { name: 'LFT', department: 'Biochemistry', rows: rows(5) }, { name: 'Lipid', department: 'Biochemistry', rows: rows(5) }];
+  assert.equal(await pages(small), 1, 'small tests share a page');
+  assert.equal(await pages(small, { printPageBreak: 'test' }), 3);
+  assert.equal(await pages(small, { printPageBreak: 'department' }), 2);
+  // 22 rows fill most of page 1, so a 20-row test moves whole to page 2 instead of leaving its tail behind.
+  assert.equal(await pages([{ name: 'A', rows: rows(22) }, { name: 'B', rows: rows(20) }]), 2);
 });
 
 test('a critical result keeps which way it is out of range, so the report can print ▲ or ▼', () => {

@@ -6,7 +6,7 @@ import { nextNumber } from '@/lib/numbers';
 import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { can } from '@/lib/roles';
-import { postApi } from '@/components/kit';
+import { postApi, todayInput } from '@/components/kit';
 import { downloadReportPdf, reportPdfUrl, ReportPreview } from '@/components/ReportPreview';
 import { AppLayout } from '@/components/AppLayout';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -65,7 +65,7 @@ function QuickRegisterContent() {
   const [ageUnit, setAgeUnit] = useState<'YEARS' | 'MONTHS' | 'DAYS'>('YEARS');
   const [gender, setGender] = useState<'MALE' | 'FEMALE' | 'OTHER'>('MALE');
   const [mobile, setMobile] = useState('');
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayInput); // local date: UTC would be yesterday before 5:30 AM IST
   const [referredDoctorId, setReferredDoctorId] = useState('');
   const [manualDoctorName, setManualDoctorName] = useState('');
   
@@ -988,7 +988,7 @@ function QuickRegisterContent() {
     setAgeUnit('YEARS');
     setGender('MALE');
     setMobile('');
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayInput());
     setReferredDoctorId('');
     setManualDoctorName('');
     setSelectedTests([]);

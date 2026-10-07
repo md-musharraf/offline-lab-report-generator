@@ -12,6 +12,7 @@ model LabSettings {
   id               Int       @id @default(autoincrement())
   labName          String
   logo             Bytes?    // stored as base64 blob
+  logoRight        Bytes?    // optional second logo, right of the lab name
   address          String
   mobile           String
   email            String?
@@ -44,6 +45,10 @@ model LabSettings {
   letterheadBottomMm Int     @default(20)
   printColor       String    @default("#0e7490") // report accent colour
   printFontSize    Int       @default(10)        // result table text size, pt
+  printNameFont    String    @default("times")   // lab name: times | helvetica | courier
+  printNameSize    Int       @default(26)        // lab name size, pt (shrinks to fit)
+  printNameColor   String?                       // lab name colour; empty = darker report colour
+  printPageBreak   String    @default("continuous") // continuous | department | test
   // Who signs (frozen into each report when it is approved)
   coSigning        Boolean   @default(false)
   licenseKey       String?

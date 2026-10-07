@@ -254,7 +254,8 @@ ipcMain.handle('machine-reconcile-orphan', (_e, { orphanId, orderBarcode }) => (
 ipcMain.handle('backup-export', async () => {
   if (!allowed('backup:create')) return { success: false, error: 'Your role cannot export backups.' };
   try {
-    const name = `JharLab-backup-${new Date().toISOString().slice(0, 10)}.db`;
+    const d = new Date(); // local date in the name (UTC is still yesterday before 5:30 AM IST)
+    const name = `JharLab-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.db`;
     let dest = process.env.JHARLAB_DOWNLOAD_DIR && path.join(process.env.JHARLAB_DOWNLOAD_DIR, name);
     if (!dest) {
       const r = await dialog.showSaveDialog(mainWindow, {
