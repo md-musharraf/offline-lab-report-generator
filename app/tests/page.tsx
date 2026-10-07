@@ -487,7 +487,11 @@ export default function TestsPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0 bg-muted/10">
               <div>
                 <h2 className="text-base font-bold text-foreground">{editingTest ? 'Edit Pathology Test' : 'Add New Pathology Test'}</h2>
-                <p className="text-[11px] text-muted-foreground font-medium mt-0.5">Configure test settings, parameters, and reference ranges.</p>
+                <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
+                  {editingTest
+                    ? 'New price, names and ranges apply to new orders and reports approved from now on; approved reports and old bills keep theirs.'
+                    : 'Configure test settings, parameters, and reference ranges.'}
+                </p>
               </div>
               <button onClick={() => setShowAddModal(false)} className="p-1.5 rounded-xl border hover:bg-accent border-border text-muted-foreground hover:text-foreground"><XIcon className="h-4 w-4" /></button>
             </div>

@@ -32,7 +32,17 @@ model LabSettings {
   technicianSignature Bytes?
   pathologyDoctorSignature Bytes?
   stamp            Bytes?
-  printHeader      String?
+  printHeader      String?   // tagline under the lab name on reports
+  nablNumber       String?
+  // How reports print (applied at print time, also to old reports)
+  printShowLogo    Boolean   @default(true)
+  printShowQR      Boolean   @default(true)
+  printSignatures  Boolean   @default(true)
+  letterhead       Boolean   @default(false) // pre-printed paper: leave header/footer space blank
+  letterheadTopMm  Int       @default(40)
+  letterheadBottomMm Int     @default(20)
+  // Who signs (frozen into each report when it is approved)
+  coSigning        Boolean   @default(false)
   licenseKey       String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -189,6 +199,7 @@ model TestOrderItem {
   testId             Int
   test               Test        @relation(fields: [testId], references: [id])
   selectedParameters String?     // Comma-separated list of parameter IDs of selected parameters
+  price              Float?      // charged when ordered; later test price changes do not touch it
   results            TestResult[]
   status             String      @default("PENDING") // ItemStatus enum
   enteredBy          Int?
@@ -237,6 +248,7 @@ model Bill {
   paymentStatus   String       @default("UNPAID") // PaymentStatus enum
   referralCommission Float?
   notes           String?
+  lab             String?     // lab name/address/phone/GSTIN when the bill was made (JSON), so reprints keep them
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   orders          TestOrder[]
@@ -264,7 +276,11 @@ model Report {
   id          Int       @id @default(autoincrement())
   orderId     Int       @unique
   order       TestOrder @relation(fields: [orderId], references: [id])
-  pdfData     Bytes?    // stored PDF blob for caching
+  pdfData     Bytes?    // unused (older versions)
+  // Everything the report prints, frozen at approval (JSON, images as ReportAsset hashes), so later
+  // changes to the logo, address, signatures, tests, ranges or patient details never rewrite it.
+  snapshot    String?
+  version     Int       @default(0) // times approved; above 1 = amended
   printCount  Int       @default(0)
   approvedBy  Int?
   approvedAt  DateTime?
@@ -272,6 +288,13 @@ model Report {
   deliveryMethod String? // DeliveryMethod enum
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+// Logo and signature images printed on approved reports, stored once per distinct image.
+model ReportAsset {
+  hash      String   @id // sha256 of data
+  data      Bytes
+  createdAt DateTime @default(now())
 }
 
 model Doctor {

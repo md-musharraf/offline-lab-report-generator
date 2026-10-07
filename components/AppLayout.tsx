@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Moon, Sun, LogOut, ChevronRight, WifiOff, Send, ShieldAlert } from 'lucide-react';
 import { useEnterAsTab } from '@/lib/useEnterAsTab';
 import { useRouter, usePathname } from 'next/navigation';
-import { canOpen, roleLabel } from '@/lib/roles';
+import { can, canOpen, roleLabel } from '@/lib/roles';
+import { postApi } from '@/components/kit';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,28 @@ const SHORTCUTS: Record<string, string> = {
   F6: '/patients',
   F7: '/billing',
 };
+
+// Older versions kept some report print options only in this browser profile. Move them into the database
+// once, where the backend reads them; the doctor/technician copies kept here are dropped (the database has them).
+const LEGACY_PRINT_KEYS = ['printShowLogo', 'printShowQR', 'printPaperSize', 'doctorSignature', 'coSigningEnabled', 'labNabl', 'doctorName', 'doctorQualification', 'doctorRegNo', 'pathologyDoctorName', 'pathologyDoctorQualification', 'pathologyDoctorRegNo', 'technicianName', 'technicianQualification', 'technicianRegNo'];
+function importLegacyPrintOptions(role: string) {
+  try {
+    const s = JSON.parse(localStorage.getItem('pathology_lab_general_settings') || 'null');
+    if (!s || !can(role, 'settings') || !LEGACY_PRINT_KEYS.some(k => k in s)) return;
+    postApi('settings/import-print-options', {
+      printShowLogo: s.printShowLogo,
+      printShowQR: s.printShowQR,
+      printSignatures: s.doctorSignature === undefined ? undefined : s.doctorSignature !== 'Disabled',
+      coSigning: s.coSigningEnabled,
+      nablNumber: s.labNabl === 'MC-XXXX' ? undefined : s.labNabl, // MC-XXXX was the old placeholder
+    })
+      .then(() => {
+        LEGACY_PRINT_KEYS.forEach(k => delete s[k]);
+        localStorage.setItem('pathology_lab_general_settings', JSON.stringify(s));
+      })
+      .catch(() => {}); // tried again next time
+  } catch {}
+}
 
 const readOutbox = (): any[] => {
   try {
@@ -93,6 +116,7 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
       }
       setCurrentUser(user);
       setSessionLoading(false);
+      importLegacyPrintOptions(user.role);
     };
     checkSession();
   }, [router]);

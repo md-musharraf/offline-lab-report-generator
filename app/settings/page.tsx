@@ -17,6 +17,29 @@ function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
 }
 
 
+// Logos and signatures from a phone can be several MB; reports only need a few hundred pixels. Redraws the
+// image as PNG (keeps transparency) no larger than maxW x maxH.
+function shrinkImage(file: File, maxW: number, maxH: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, maxW / img.width, maxH / img.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * k));
+      canvas.height = Math.max(1, Math.round(img.height * k));
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('That file is not an image this app can read. Use PNG or JPG.'));
+    };
+    img.src = url;
+  });
+}
+
 const settingsSections = [
   { id: 'lab', name: 'Lab Profile', icon: Building2, desc: 'Lab name, logo, address, NABL number, GST' },
   { id: 'print', name: 'Print Settings', icon: Printer, desc: 'Report header, footer, signature, stamp' },
@@ -72,22 +95,24 @@ export default function SettingsPage() {
   // Lab Profile state
   const [logo, setLogo] = useState<string | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [labName, setLabName] = useState('JharLab');
-  const [labMobile, setLabMobile] = useState('+91 9876543210');
-  const [labEmail, setLabEmail] = useState('info@citypathlab.com');
-  const [labWebsite, setLabWebsite] = useState('www.citypathlab.com');
-  const [labNabl, setLabNabl] = useState('MC-XXXX');
-  const [labGst, setLabGst] = useState('27AADCB1234M1Z5');
-  const [labRegNo, setLabRegNo] = useState('LAB/REG/2024/001');
+  const [labName, setLabName] = useState('');
+  const [labMobile, setLabMobile] = useState('');
+  const [labEmail, setLabEmail] = useState('');
+  const [labWebsite, setLabWebsite] = useState('');
+  const [labNabl, setLabNabl] = useState('');
+  const [labGst, setLabGst] = useState('');
+  const [labRegNo, setLabRegNo] = useState('');
   const [labGstPercent, setLabGstPercent] = useState('18');
-  const [labAddress, setLabAddress] = useState('123, Medical Complex, MG Road, Mumbai, Maharashtra - 400001');
+  const [labAddress, setLabAddress] = useState('');
 
   // Print Settings state
-  const [printHeader, setPrintHeader] = useState('JharLab — NABL Accredited');
-  const [printFooter, setPrintFooter] = useState('This is a computer-generated report. Results should be correlated clinically.');
+  const [printHeader, setPrintHeader] = useState('');
+  const [printFooter, setPrintFooter] = useState('');
   const [printShowLogo, setPrintShowLogo] = useState(true);
   const [printShowQR, setPrintShowQR] = useState(true);
-  const [printPaperSize, setPrintPaperSize] = useState('A4');
+  const [letterhead, setLetterhead] = useState(false);
+  const [letterheadTopMm, setLetterheadTopMm] = useState(40);
+  const [letterheadBottomMm, setLetterheadBottomMm] = useState(20);
 
   // Appearance state
   const [darkMode, setDarkMode] = useState(false);
@@ -114,19 +139,19 @@ export default function SettingsPage() {
   const [backupRetention, setBackupRetention] = useState('30');
 
   // Doctor/Pathologist state
-  const [doctorName, setDoctorName] = useState('Dr. Rajesh Pathak');
-  const [doctorQualification, setDoctorQualification] = useState('MD (Pathology), MBBS');
-  const [doctorRegNo, setDoctorRegNo] = useState('MMC/REG/12345');
+  const [doctorName, setDoctorName] = useState('');
+  const [doctorQualification, setDoctorQualification] = useState('');
+  const [doctorRegNo, setDoctorRegNo] = useState('');
   const [doctorSignature, setDoctorSignature] = useState('Enabled');
 
   // Pathology Doctor state
-  const [pathologyDoctorName, setPathologyDoctorName] = useState('Dr. Vimal Shah');
-  const [pathologyDoctorQualification, setPathologyDoctorQualification] = useState('MD (Pathology)');
-  const [pathologyDoctorRegNo, setPathologyDoctorRegNo] = useState('MMC/REG/67890');
+  const [pathologyDoctorName, setPathologyDoctorName] = useState('');
+  const [pathologyDoctorQualification, setPathologyDoctorQualification] = useState('');
+  const [pathologyDoctorRegNo, setPathologyDoctorRegNo] = useState('');
 
   // Technician state
-  const [technicianName, setTechnicianName] = useState('Medical Lab Technician');
-  const [technicianQualification, setTechnicianQualification] = useState('DMLT, BMLT');
+  const [technicianName, setTechnicianName] = useState('');
+  const [technicianQualification, setTechnicianQualification] = useState('');
   const [technicianRegNo, setTechnicianRegNo] = useState('');
   const [coSigningEnabled, setCoSigningEnabled] = useState(false);
 
@@ -159,16 +184,24 @@ export default function SettingsPage() {
         setLabGst(profile.gstNumber || '');
         setLabRegNo(profile.registrationNo || '');
         setPrintFooter(profile.reportFooter || '');
-        setDoctorName(profile.doctorName || 'Dr. Rajesh Pathak');
-        setDoctorQualification(profile.doctorQualification || 'MD (Pathology), MBBS');
-        setDoctorRegNo(profile.doctorRegNo || 'MMC/REG/12345');
-        setPathologyDoctorName(profile.pathologyDoctorName || 'Dr. Vimal Shah');
-        setPathologyDoctorQualification(profile.pathologyDoctorQualification || 'MD (Pathology)');
-        setPathologyDoctorRegNo(profile.pathologyDoctorRegNo || 'MMC/REG/67890');
-        setTechnicianName(profile.technicianName || 'Medical Lab Technician');
-        setTechnicianQualification(profile.technicianQualification || 'DMLT, BMLT');
+        setDoctorName(profile.doctorName || '');
+        setDoctorQualification(profile.doctorQualification || '');
+        setDoctorRegNo(profile.doctorRegNo || '');
+        setPathologyDoctorName(profile.pathologyDoctorName || '');
+        setPathologyDoctorQualification(profile.pathologyDoctorQualification || '');
+        setPathologyDoctorRegNo(profile.pathologyDoctorRegNo || '');
+        setTechnicianName(profile.technicianName || '');
+        setTechnicianQualification(profile.technicianQualification || '');
         setTechnicianRegNo(profile.technicianRegNo || '');
         setPrintHeader(profile.printHeader || '');
+        setLabNabl(profile.nablNumber || '');
+        setPrintShowLogo(profile.printShowLogo !== false);
+        setPrintShowQR(profile.printShowQR !== false);
+        setDoctorSignature(profile.printSignatures === false ? 'Disabled' : 'Enabled');
+        setCoSigningEnabled(profile.coSigning === true);
+        setLetterhead(profile.letterhead === true);
+        setLetterheadTopMm(profile.letterheadTopMm ?? 40);
+        setLetterheadBottomMm(profile.letterheadBottomMm ?? 20);
         if (profile.logo) {
           let base64Logo = '';
           if (profile.logo.type === 'Buffer' && Array.isArray(profile.logo.data)) {
@@ -230,9 +263,6 @@ export default function SettingsPage() {
           const s = JSON.parse(stored);
           setDarkMode(!!s.darkMode);
           setAccentColor(s.accentColor || '#3B82F6');
-          setPrintShowLogo(s.printShowLogo !== false);
-          setPrintShowQR(s.printShowQR !== false);
-          setPrintPaperSize(s.printPaperSize || 'A4');
           setSmsEnabled(!!s.smsEnabled);
           setEmailEnabled(s.emailEnabled !== false);
           setWhatsappEnabled(!!s.whatsappEnabled);
@@ -242,23 +272,11 @@ export default function SettingsPage() {
           setAutoBackup(s.autoBackup !== false);
           setBackupTime(s.backupTime || '08:00');
           setBackupRetention(s.backupRetention || '30');
-          setDoctorName(s.doctorName || profile?.doctorName || 'Dr. Rajesh Pathak');
-          setDoctorQualification(s.doctorQualification || profile?.doctorQualification || 'MD (Pathology), MBBS');
-          setDoctorRegNo(s.doctorRegNo || profile?.doctorRegNo || 'MMC/REG/12345');
-          setDoctorSignature(s.doctorSignature || 'Enabled');
-          setCoSigningEnabled(s.coSigningEnabled === true);
-          setPathologyDoctorName(s.pathologyDoctorName || profile?.pathologyDoctorName || 'Dr. Vimal Shah');
-          setPathologyDoctorQualification(s.pathologyDoctorQualification || profile?.pathologyDoctorQualification || 'MD (Pathology)');
-          setPathologyDoctorRegNo(s.pathologyDoctorRegNo || profile?.pathologyDoctorRegNo || 'MMC/REG/67890');
-          setTechnicianName(s.technicianName || profile?.technicianName || 'Medical Lab Technician');
-          setTechnicianQualification(s.technicianQualification || profile?.technicianQualification || 'DMLT, BMLT');
-          setTechnicianRegNo(s.technicianRegNo || profile?.technicianRegNo || '');
           setAnalyzerPort(s.analyzerPort || 'COM3');
           setAnalyzerBaud(s.analyzerBaud || '9600');
           setAnalyzerProtocol(s.analyzerProtocol || 'HL7');
           setAnalyzerAutoImport(s.analyzerAutoImport !== false);
           setLabGstPercent(s.labGstPercent || '18');
-          setLabNabl(s.labNabl || 'MC-XXXX');
         }
       }
     } catch (e) {
@@ -301,6 +319,14 @@ export default function SettingsPage() {
           technicianQualification,
           technicianRegNo,
           printHeader,
+          nablNumber: labNabl,
+          printShowLogo,
+          printShowQR,
+          printSignatures: doctorSignature === 'Enabled',
+          coSigning: coSigningEnabled,
+          letterhead,
+          letterheadTopMm: Math.max(0, Math.min(120, Math.round(Number(letterheadTopMm) || 0))),
+          letterheadBottomMm: Math.max(0, Math.min(80, Math.round(Number(letterheadBottomMm) || 0))),
           logo,
           signature: doctorSignatureImage,
           technicianSignature: technicianSignature,
@@ -319,9 +345,6 @@ export default function SettingsPage() {
         const s = {
           darkMode,
           accentColor,
-          printShowLogo,
-          printShowQR,
-          printPaperSize,
           smsEnabled,
           emailEnabled,
           whatsappEnabled,
@@ -331,23 +354,11 @@ export default function SettingsPage() {
           autoBackup,
           backupTime,
           backupRetention,
-          doctorName,
-          doctorQualification,
-          doctorRegNo,
-          doctorSignature,
-          coSigningEnabled,
-          pathologyDoctorName,
-          pathologyDoctorQualification,
-          pathologyDoctorRegNo,
-          technicianName,
-          technicianQualification,
-          technicianRegNo,
           analyzerPort,
           analyzerBaud,
           analyzerProtocol,
           analyzerAutoImport,
-          labGstPercent,
-          labNabl
+          labGstPercent
         };
         localStorage.setItem('pathology_lab_general_settings', JSON.stringify(s));
       }
@@ -359,16 +370,16 @@ export default function SettingsPage() {
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
-        setLogo(base64);
-        setLogoPreview(base64);
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const png = await shrinkImage(file, 600, 600);
+      setLogo(png);
+      setLogoPreview(png);
+    } catch (err: any) {
+      setToast({ message: err.message, type: 'error' });
     }
   };
 
@@ -377,24 +388,26 @@ export default function SettingsPage() {
     setLogoPreview(null);
   };
 
-  const handleSignatureUpload = (e: React.ChangeEvent<HTMLInputElement>, role: 'technician' | 'doctor' | 'pathology') => {
+  const handleSignatureUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: 'technician' | 'doctor' | 'pathology') => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result as string;
-        if (role === 'technician') {
-          setTechnicianSignature(base64);
-          setTechnicianSignaturePreview(base64);
-        } else if (role === 'doctor') {
-          setDoctorSignatureImage(base64);
-          setDoctorSignaturePreview(base64);
-        } else if (role === 'pathology') {
-          setPathologyDoctorSignatureImage(base64);
-          setPathologyDoctorSignaturePreview(base64);
-        }
-      };
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    let base64: string;
+    try {
+      base64 = await shrinkImage(file, 600, 200);
+    } catch (err: any) {
+      setToast({ message: err.message, type: 'error' });
+      return;
+    }
+    if (role === 'technician') {
+      setTechnicianSignature(base64);
+      setTechnicianSignaturePreview(base64);
+    } else if (role === 'doctor') {
+      setDoctorSignatureImage(base64);
+      setDoctorSignaturePreview(base64);
+    } else if (role === 'pathology') {
+      setPathologyDoctorSignatureImage(base64);
+      setPathologyDoctorSignaturePreview(base64);
     }
   };
 
@@ -484,6 +497,7 @@ export default function SettingsPage() {
             {activeSection === 'lab' && (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Lab Profile</h3>
+                <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">Changes here print on reports approved from now on. Reports already approved keep the details they were approved with.</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Lab Name</label>
@@ -544,7 +558,7 @@ export default function SettingsPage() {
                       )}
                       <div className="flex flex-col gap-1.5">
                         <div className="flex items-center gap-2">
-                          <input type="file" accept="image/png, image/jpeg" onChange={handleLogoUpload} className="hidden" id="logo-upload-input" />
+                          <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" id="logo-upload-input" />
                           <label htmlFor="logo-upload-input" className="cursor-pointer text-xs font-semibold border rounded-lg px-3 py-2 hover:bg-accent bg-background transition-colors">
                             Upload Logo
                           </label>
@@ -554,7 +568,7 @@ export default function SettingsPage() {
                             </button>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground">Supports PNG or JPEG. Recommended size: square or landscape with transparent/white background.</p>
+                        <p className="text-xs text-muted-foreground">PNG or JPG, square or landscape, on a white or transparent background.</p>
                       </div>
                     </div>
                   </div>
@@ -569,30 +583,38 @@ export default function SettingsPage() {
                 <h3 className="text-lg font-semibold text-foreground">Print Settings</h3>
                 <div className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Report Header Text</label>
-                    <input type="text" value={printHeader} onChange={e => setPrintHeader(e.target.value)}
+                    <label htmlFor="print-header" className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Tagline under the lab name</label>
+                    <input id="print-header" type="text" value={printHeader} onChange={e => setPrintHeader(e.target.value)} placeholder="e.g. Advanced Diagnostics & Research Centre"
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Report Footer Text</label>
-                    <textarea rows={2} value={printFooter} onChange={e => setPrintFooter(e.target.value)}
+                    <label htmlFor="print-footer" className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Report footer note</label>
+                    <textarea id="print-footer" rows={2} value={printFooter} onChange={e => setPrintFooter(e.target.value)} placeholder="Results relate only to the sample tested. This is a computer-generated report; kindly correlate clinically."
                       className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
+                  <p className="text-xs text-muted-foreground">The tagline and footer note are frozen into each report when it is approved. The options below decide how any report prints, including old ones.</p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-3 rounded-lg border p-4">
                       <Toggle checked={printShowLogo} onChange={setPrintShowLogo} label="Show Lab Logo" />
                       <Toggle checked={printShowQR} onChange={setPrintShowQR} label="Show QR Code" />
                     </div>
-                    <div>
-                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Paper Size</label>
-                      <div className="mt-2 flex gap-2">
-                        {['A4', 'A5', 'Letter'].map(size => (
-                          <button key={size} onClick={() => setPrintPaperSize(size)}
-                            className={`rounded-lg px-4 py-2 text-sm font-medium border transition-colors ${printPaperSize === size ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-foreground hover:bg-accent'}`}>
-                            {size}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="space-y-3 rounded-lg border p-4">
+                      <Toggle checked={letterhead} onChange={setLetterhead} label="Print on pre-printed letterhead" />
+                      <p className="text-xs text-muted-foreground">Leaves the top and bottom of every page blank for your printed letterhead paper.</p>
+                      {letterhead && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Top space (mm)</span>
+                            <input type="number" min={0} max={120} value={letterheadTopMm} onChange={e => setLetterheadTopMm(Number(e.target.value))}
+                              className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                          </label>
+                          <label className="block">
+                            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Bottom space (mm)</span>
+                            <input type="number" min={0} max={80} value={letterheadBottomMm} onChange={e => setLetterheadBottomMm(Number(e.target.value))}
+                              className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -696,6 +718,7 @@ export default function SettingsPage() {
                   <h3 className="text-lg font-semibold text-foreground">Signatures & Authorities</h3>
                   <p className="text-xs text-muted-foreground font-medium">Manage credentials that appear on printed reports</p>
                 </div>
+                <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">Changes here print on reports approved from now on. Reports already approved keep the details they were approved with.</p>
                 
                 {/* 1. Medical Lab Technician Section */}
                 <div className="space-y-4 rounded-lg border p-4 bg-muted/20">
@@ -730,7 +753,7 @@ export default function SettingsPage() {
                           </div>
                         )}
                         <div className="flex items-center gap-2">
-                          <input type="file" accept="image/png, image/jpeg" onChange={(e) => handleSignatureUpload(e, 'technician')} className="hidden" id="tech-sig-upload" />
+                          <input type="file" accept="image/*" onChange={(e) => handleSignatureUpload(e, 'technician')} className="hidden" id="tech-sig-upload" />
                           <label htmlFor="tech-sig-upload" className="cursor-pointer text-xs font-semibold border rounded px-3 py-1.5 hover:bg-accent bg-background transition-colors">
                             Upload Signature
                           </label>
@@ -778,7 +801,7 @@ export default function SettingsPage() {
                           </div>
                         )}
                         <div className="flex items-center gap-2">
-                          <input type="file" accept="image/png, image/jpeg" onChange={(e) => handleSignatureUpload(e, 'doctor')} className="hidden" id="doctor-sig-upload" />
+                          <input type="file" accept="image/*" onChange={(e) => handleSignatureUpload(e, 'doctor')} className="hidden" id="doctor-sig-upload" />
                           <label htmlFor="doctor-sig-upload" className="cursor-pointer text-xs font-semibold border rounded px-3 py-1.5 hover:bg-accent bg-background transition-colors">
                             Upload Signature
                           </label>
@@ -851,7 +874,7 @@ export default function SettingsPage() {
                             </div>
                           )}
                           <div className="flex items-center gap-2">
-                            <input type="file" accept="image/png, image/jpeg" onChange={(e) => handleSignatureUpload(e, 'pathology')} className="hidden" id="pathology-sig-upload" />
+                            <input type="file" accept="image/*" onChange={(e) => handleSignatureUpload(e, 'pathology')} className="hidden" id="pathology-sig-upload" />
                             <label htmlFor="pathology-sig-upload" className="cursor-pointer text-xs font-semibold border rounded px-3 py-1.5 hover:bg-accent bg-background transition-colors">
                               Upload Signature
                             </label>

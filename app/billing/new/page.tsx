@@ -373,7 +373,8 @@ function NewBillingPageContent() {
           priority: 'ROUTINE',
           items: {
             create: selectedTests.map(t => ({
-              testId: t.id
+              testId: t.id,
+              price: t.price
             }))
           }
         }

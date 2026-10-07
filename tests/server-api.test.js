@@ -137,7 +137,7 @@ test('technician registers, bills, collects, enters and approves results; stamps
   const cbc = await prisma.test.findFirst({ where: { code: 'HEM001' }, include: { parameters: true } });
   const order = await q(tech, 'testOrder', 'create', { data: { orderNo, patientId: pid, billId: bill.id, items: { create: [{ testId: cbc.id }] } }, include: { items: true } });
   await q(tech, 'testResult', 'create', { data: { orderItemId: order.items[0].id, parameterId: cbc.parameters[0].id, numericValue: 10.2, status: 'ENTERED', enteredBy: 1 } });
-  await q(tech, 'report', 'create', { data: { orderId: order.id, approvedBy: 1, approvedAt: new Date() } });
+  assert.equal((await call(tech, 'POST', 'reports/approve', { orderId: order.id })).json.success, true);
   await q(tech, 'labSettings', 'update', { where: { id: 1 }, data: { reportFooter: 'Checked by technician' } });
 
   const payment = await prisma.payment.findFirst();
@@ -203,7 +203,7 @@ test('password hashes never leave the backend, whatever query asks for them', as
 test('every change is in the audit log under the person who made it', async () => {
   const logs = await q(owner, 'activityLog', 'findMany', { where: { userId: techUserId }, orderBy: { id: 'asc' } });
   const actions = logs.map(l => `${l.module}: ${l.action}`);
-  for (const expected of ['Staff: Signed in', 'Patients: Created patient', 'Billing: Created bill', 'Billing: Created payment', 'Results: Created result', 'Reports: Created report', 'Settings: Updated lab settings']) {
+  for (const expected of ['Staff: Signed in', 'Patients: Created patient', 'Billing: Created bill', 'Billing: Created payment', 'Results: Created result', 'Reports: Approved report', 'Settings: Updated lab settings']) {
     assert.ok(actions.includes(expected), `missing "${expected}" in ${actions.join(' | ')}`);
   }
   assert.match(logs.find(l => l.action === 'Created payment').details, /₹400 CASH on bill #\d+/, 'details are readable, not JSON');
@@ -275,11 +275,158 @@ test('editing a test keeps parameter ids, so saved results stay attached', async
   assert.equal(hb.unit, 'g/dl (edited)');
 });
 
-test('report QR verification URL is signed and the PNG renders', async () => {
-  const res = await call(owner, 'POST', 'reports/qrcode', { orderNo: 'ORD-1', patientName: 'Rajesh', getUrlOnly: true });
-  assert.match(res.json.verifyUrl, /\/verify\?p=.+&s=[0-9a-f]{16}$/);
-  const png = await call(owner, 'POST', 'reports/qrcode', { orderNo: 'ORD-1', patientName: 'Rajesh', tests: [] });
-  assert.deepEqual([...png.body.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+// ---- Reports: frozen at approval ----
+const png = text => require('bwip-js').toBuffer({ bcid: 'qrcode', text, scale: 1 });
+const cbcWithHb = async () => {
+  const cbc = await prisma.test.findFirst({ where: { code: 'HEM001' }, include: { parameters: { include: { refRanges: true }, orderBy: { sortOrder: 'asc' } } } });
+  return { cbc, hb: cbc.parameters.find(p => !p.isHeader) };
+};
+async function orderWithResult(ctx, pid, value = 10.2) {
+  const { cbc, hb } = await cbcWithHb();
+  const orderNo = (await call(ctx, 'POST', 'numbers/next', { kind: 'order' })).json.number;
+  const order = await q(ctx, 'testOrder', 'create', { data: { orderNo, patientId: pid, status: 'RESULT_ENTERED', items: { create: [{ testId: cbc.id, price: 300 }] } }, include: { items: true } });
+  await q(ctx, 'testResult', 'create', { data: { orderItemId: order.items[0].id, parameterId: hb.id, numericValue: value, flag: '↓', status: 'ENTERED', enteredBy: 1 } });
+  return order;
+}
+const hbRow = data => data.tests[0].rows.find(r => !r.header);
+let frozenPid;
+
+test('approving freezes the report: later logo, address, signature, range, test, price and patient changes do not alter it', async () => {
+  const logoA = await png('logo A');
+  const sigA = await png('signature A');
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Ranchi', logo: logoA.toString('base64'), doctorName: 'Dr. A', doctorRegNo: 'JMC-1', signature: sigA, technicianName: 'Asha' } });
+  frozenPid = (await call(owner, 'POST', 'numbers/next', { kind: 'patient' })).json.number;
+  await q(owner, 'patient', 'create', { data: { id: frozenPid, name: 'Suresh Mahto', age: 45, gender: 'MALE', mobile: '9000000001', createdBy: 1 } });
+  const first = await orderWithResult(tech, frozenPid);
+
+  const draft = await api.loadReport(prisma, first.id);
+  assert.equal(draft.data.status, 'DRAFT', 'before approval it is a draft built from current data');
+  const approved = await call(tech, 'POST', 'reports/approve', { orderId: first.id });
+  assert.equal(approved.json.version, 1);
+  const before = await api.loadReport(prisma, first.id);
+  assert.equal(before.data.status, 'FINAL');
+  assert.equal(before.data.lab.address, 'Ranchi');
+  assert.deepEqual(before.data.signatories.map(x => x.name), ['Asha', 'Dr. A']);
+  assert.equal(hbRow(before.data).range, '13 - 17');
+  assert.equal(hbRow(before.data).flag, 'L');
+  assert.equal(before.data.patient.age, '45 Years');
+  assert.ok(before.data.reportedAt, 'report date is the approval time');
+  assert.ok(before.assets[before.data.lab.logo].equals(logoA), 'logo stored with the report');
+
+  // The lab changes everything...
+  const { cbc, hb } = await cbcWithHb();
+  const params = cbc.parameters.map(x => (x.id === hb.id ? { ...x, refRanges: [{ gender: 'MALE', normalMin: 12, normalMax: 16 }] } : x));
+  await q(owner, 'test', 'update', { where: { id: cbc.id }, data: { name: 'CBC (renamed)', price: 999, parameters: params } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Dumka', logo: (await png('logo B')).toString('base64'), doctorName: 'Dr. B', signature: await png('signature B') } });
+  await q(owner, 'patient', 'update', { where: { id: frozenPid }, data: { age: 46 } });
+
+  // ...the approved report does not change,
+  const after = await api.loadReport(prisma, first.id);
+  assert.deepEqual(after.data, before.data);
+  assert.ok(after.assets[after.data.lab.logo].equals(logoA), 'still the old logo');
+  assert.equal((await prisma.testOrderItem.findFirst({ where: { orderId: first.id } })).price, 300, 'price charged stays');
+
+  // ...and the next report gets the new details.
+  const second = await orderWithResult(tech, frozenPid, 11);
+  await call(tech, 'POST', 'reports/approve', { orderId: second.id });
+  const next = (await api.loadReport(prisma, second.id)).data;
+  assert.equal(next.lab.address, 'Dumka');
+  assert.equal(next.signatories.at(-1).name, 'Dr. B');
+  assert.equal(next.tests[0].name, 'CBC (renamed)');
+  assert.equal(hbRow(next).range, '12 - 16');
+  assert.equal(next.patient.age, '46 Years');
+  assert.equal(await prisma.reportAsset.count(), 4, 'each distinct image stored once');
+
+  // Both print in one PDF; printing counts, previews do not.
+  const pdf = await call(tech, 'POST', 'reports/pdf', { orderIds: [first.id, second.id] });
+  assert.equal(pdf.type, 'application/pdf');
+  assert.equal(pdf.body.subarray(0, 5).toString(), '%PDF-');
+  const { PDFDocument } = require('pdf-lib');
+  assert.equal((await PDFDocument.load(pdf.body)).getPageCount(), 2);
+  await call(tech, 'POST', 'reports/pdf', { orderId: first.id, preview: true });
+  assert.equal((await prisma.report.findUnique({ where: { orderId: first.id } })).printCount, 1);
+});
+
+test('editing results of an approved report makes it a draft; approving it again is marked amended', async () => {
+  const order = await prisma.testOrder.findFirst({ where: { patientId: frozenPid }, orderBy: { id: 'asc' }, include: { items: { include: { results: true } } } });
+  await q(tech, 'testResult', 'update', { where: { id: order.items[0].results[0].id }, data: { numericValue: 12.5, flag: null } });
+  await q(tech, 'testOrder', 'update', { where: { id: order.id }, data: { status: 'RESULT_ENTERED' } });
+  assert.equal((await api.loadReport(prisma, order.id)).data.status, 'DRAFT');
+  assert.equal((await call(tech, 'POST', 'reports/verify-url', { orderId: order.id })).status, 400, 'no verification link for a draft');
+
+  assert.equal((await call(tech, 'POST', 'reports/approve', { orderId: order.id })).json.version, 2);
+  const amended = (await api.loadReport(prisma, order.id)).data;
+  assert.equal(amended.version, 2);
+  assert.equal(hbRow(amended).value, '12.5');
+  assert.equal(hbRow(amended).flag, null);
+  assert.ok(await prisma.activityLog.findFirst({ where: { action: 'Approved amended report' } }));
+  assert.match((await call(tech, 'POST', 'reports/verify-url', { orderId: order.id })).json.verifyUrl, /\/verify\?p=.+&s=[0-9a-f]{16}$/);
+});
+
+test('reports and bills made by an older version are frozen before the first change that would alter them', async () => {
+  const legacy = async () => {
+    const o = await orderWithResult(owner, frozenPid);
+    await prisma.testOrder.update({ where: { id: o.id }, data: { status: 'APPROVED' } });
+    await prisma.report.create({ data: { orderId: o.id, approvedBy: 1, approvedAt: new Date() } });
+    return o;
+  };
+  const a = await legacy();
+  const oldBill = await prisma.bill.create({ data: { billNo: 'OLD-BILL-1', patientId: frozenPid, subtotal: 100, totalAmount: 100 } });
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { letterhead: true, printShowQR: false } });
+  assert.equal((await prisma.report.findUnique({ where: { orderId: a.id } })).snapshot, null, 'print options do not change what a report says');
+  await q(owner, 'labSettings', 'update', { where: { id: 1 }, data: { address: 'Deoghar', letterhead: false, printShowQR: true } });
+  const frozen = (await api.loadReport(prisma, a.id)).data;
+  assert.equal(frozen.lab.address, 'Dumka', 'frozen with what it printed before the change');
+  assert.equal(frozen.version, 1);
+  const billLab = async id => JSON.parse((await prisma.bill.findUnique({ where: { id } })).lab);
+  assert.equal((await billLab(oldBill.id)).address, 'Dumka', 'an old bill keeps the address it was made with');
+  const newBill = await q(owner, 'bill', 'create', { data: { billNo: 'NEW-BILL-1', patientId: frozenPid, subtotal: 100, totalAmount: 100 } });
+  assert.equal((await billLab(newBill.id)).address, 'Deoghar', 'a new bill gets the current address');
+  await denied(q(owner, 'bill', 'update', { where: { id: newBill.id }, data: { lab: '{}' } }), /not allowed/);
+
+  const b = await legacy();
+  await q(owner, 'patient', 'update', { where: { id: frozenPid }, data: { name: 'Suresh Kumar Mahto' } });
+  assert.equal((await api.loadReport(prisma, b.id)).data.patient.name, 'Suresh Mahto');
+});
+
+test('nobody approves by writing the report row or plants a snapshot; approval needs results and the right role', async () => {
+  const order = await orderWithResult(owner, frozenPid);
+  await denied(q(owner, 'report', 'create', { data: { orderId: order.id, approvedBy: 1, approvedAt: new Date() } }), /not allowed/);
+  await denied(q(owner, 'report', 'updateMany', { where: {}, data: { snapshot: '{}' } }), /not allowed/);
+  await denied(q(owner, 'reportAsset', 'deleteMany', { where: {} }), /not allowed/);
+  assert.equal((await call(recep, 'POST', 'reports/approve', { orderId: order.id })).status, 403);
+  const empty = await q(owner, 'testOrder', 'create', { data: { orderNo: 'EMPTY-1', patientId: frozenPid, items: { create: [{ testId: (await cbcWithHb()).cbc.id }] } } });
+  const res = await call(owner, 'POST', 'reports/approve', { orderId: empty.id });
+  assert.match(res.json.error, /Enter the results/);
+});
+
+test('report PDFs survive odd characters, long reports, letterhead paper and damaged images', async () => {
+  const { renderReports } = require('../lib/report-pdf');
+  const { PDFDocument } = require('pdf-lib');
+  const rows = Array.from({ length: 80 }, (_, i) => ({ name: `Parameter ${i} ≤ ≥ µ ⁶ — मरीज़`, value: String(i), unit: '10⁶/µL', range: '≤ 5.0', flag: i % 3 ? null : 'H' }));
+  const data = {
+    status: 'FINAL', version: 1, orderNo: 'ORD-1', registeredAt: new Date().toISOString(),
+    lab: { name: 'Lab ₹', logo: 'bad' }, patient: { name: 'राम Kumar', age: '30 Years', gender: 'Male', id: 'P1', referredBy: 'Self' },
+    tests: [{ name: 'Panel', department: 'Biochemistry', rows: [{ name: 'Section', header: true }, ...rows] }],
+    signatories: [{ role: 'Consultant Pathologist', name: 'Dr. X', image: 'bad' }],
+  };
+  const assets = { bad: Buffer.from('not an image') };
+  for (const opts of [{}, { letterhead: true, letterheadTopMm: 50, letterheadBottomMm: 25 }]) {
+    const doc = await PDFDocument.load(await renderReports([{ data, assets }], { ...opts, qrPng: () => png('x') }));
+    assert.ok(doc.getPageCount() >= 2);
+  }
+});
+
+test('older data is upgraded on start-up: order prices filled in, analyzer orders reach Results and Reports', async () => {
+  const { cbc } = await cbcWithHb();
+  const old = await prisma.testOrder.create({ data: { orderNo: 'OLD-ANALYZER-1', patientId: frozenPid, status: 'VERIFIED', items: { create: [{ testId: cbc.id, status: 'VERIFIED' }] } } });
+  await prisma.report.create({ data: { orderId: old.id, approvedAt: new Date() } });
+  const waiting = await prisma.testOrder.create({ data: { orderNo: 'OLD-ANALYZER-2', patientId: frozenPid, status: 'ENTERED', items: { create: [{ testId: cbc.id, status: 'ENTERED' }] } } });
+  await api.ensureSchema(prisma, sql);
+  assert.equal((await prisma.testOrder.findUnique({ where: { id: old.id } })).status, 'APPROVED');
+  assert.equal((await prisma.testOrder.findUnique({ where: { id: waiting.id } })).status, 'RESULT_ENTERED');
+  const item = await prisma.testOrderItem.findFirst({ where: { orderId: waiting.id } });
+  assert.deepEqual([item.status, item.price], ['RESULT_ENTERED', cbc.price]);
 });
 
 test('expenses, stock, home collections, outsourcing and corporate clients are saved on the PC and stamped', async () => {

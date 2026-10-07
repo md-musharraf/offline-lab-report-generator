@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Search, Plus, Filter, Download, Eye, Printer, CreditCard, Receipt, ArrowUpDown, XIcon, ChevronUp, ChevronDown } from 'lucide-react';
 import { formatCurrency } from '@/shared/constants';
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { makeTablePdf, downloadPdf, rupees } from '@/lib/pdf-table';
 import { db } from '@/lib/db';
 import { useRouter } from 'next/navigation';
 
@@ -24,6 +24,9 @@ interface Bill {
   method: string;
   status: string;
   date: string;
+  lines: { name: string; price: number | null }[];
+  gstPercent: number;
+  lab: any; // lab details as they were when the bill was made
 }
 
 const initialBills: Bill[] = [];
@@ -137,6 +140,9 @@ export default function BillingPage() {
             method: b.paymentMethod ? (b.paymentMethod.charAt(0) + b.paymentMethod.slice(1).toLowerCase()) : 'Cash',
             status: b.paymentStatus || 'UNPAID',
             date: formattedDate,
+            lines: (b.orders || []).flatMap((o: any) => (o.items || []).map((item: any) => ({ name: item.test?.name || 'Test', price: item.price ?? null }))),
+            gstPercent: b.gstPercent || 0,
+            lab: b.lab ? JSON.parse(b.lab) : null,
           };
         });
         setBills(mappedBills);
@@ -297,91 +303,33 @@ export default function BillingPage() {
     }
   };
 
-  // PDF Invoice Generation
+  // Bill PDF: the lab's own header (Settings > Lab Profile) and each test at the price charged when it was
+  // ordered. Bills from before prices were stored on orders list the tests without per-test amounts when
+  // those would not add up to the billed subtotal.
   const handlePrint = async (bill: Bill) => {
     try {
-      const pdfDoc = await PDFDocument.create();
-      const page = pdfDoc.addPage([595, 842]); // A4
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      const { height } = page.getSize();
-      const blue = rgb(0.1, 0.3, 0.6);
-      const black = rgb(0, 0, 0);
-      const gray = rgb(0.4, 0.4, 0.4);
-
-      let y = height - 50;
-
-      // Header
-      page.drawText('JharLab', { x: 50, y, size: 22, font: fontBold, color: blue });
-      y -= 20;
-      page.drawText('Tax Invoice / Receipt', { x: 50, y, size: 11, font, color: gray });
-      y -= 8;
-      page.drawLine({ start: { x: 50, y }, end: { x: 545, y }, thickness: 1.5, color: blue });
-      y -= 25;
-
-      // Bill info
-      page.drawText(`Bill No: ${bill.billNo}`, { x: 50, y, size: 11, font: fontBold, color: black });
-      page.drawText(`Date: ${bill.date}`, { x: 400, y, size: 10, font, color: gray });
-      y -= 20;
-      page.drawText(`Patient: ${bill.patient}`, { x: 50, y, size: 11, font, color: black });
-      y -= 16;
-      page.drawText(`Patient ID: ${bill.patientId}`, { x: 50, y, size: 10, font, color: gray });
-      y -= 30;
-
-      // Tests heading
-      page.drawRectangle({ x: 50, y: y - 2, width: 495, height: 20, color: rgb(0.93, 0.93, 0.97) });
-      page.drawText('Tests / Services', { x: 60, y: y + 3, size: 10, font: fontBold, color: black });
-      page.drawText('Amount', { x: 470, y: y + 3, size: 10, font: fontBold, color: black });
-      y -= 22;
-
-      // Test items
-      const testList = bill.tests.split(',').map(t => t.trim());
-      const perTest = testList.length > 0 ? Math.round(bill.subtotal / testList.length) : bill.subtotal;
-      for (const test of testList) {
-        page.drawText(test, { x: 60, y, size: 10, font, color: black });
-        page.drawText(formatCurrency(perTest), { x: 465, y, size: 10, font, color: black });
-        y -= 18;
-      }
-
-      y -= 10;
-      page.drawLine({ start: { x: 350, y }, end: { x: 545, y }, thickness: 0.5, color: gray });
-      y -= 18;
-
-      // Totals
-      const drawRow = (label: string, value: string, bold = false) => {
-        page.drawText(label, { x: 360, y, size: 10, font: bold ? fontBold : font, color: black });
-        page.drawText(value, { x: 465, y, size: 10, font: bold ? fontBold : font, color: black });
-        y -= 18;
-      };
-
-      drawRow('Subtotal:', formatCurrency(bill.subtotal));
-      if (bill.discount > 0) drawRow('Discount:', `- ${formatCurrency(bill.discount)}`);
-      drawRow('GST (18%):', formatCurrency(bill.gst));
-      page.drawLine({ start: { x: 350, y: y + 12 }, end: { x: 545, y: y + 12 }, thickness: 1, color: black });
-      y -= 4;
-      drawRow('Total:', formatCurrency(bill.total), true);
-      drawRow('Paid:', formatCurrency(bill.paid));
-      if (bill.due > 0) drawRow('Due:', formatCurrency(bill.due));
-
-      y -= 15;
-      page.drawText(`Payment Method: ${bill.method}`, { x: 50, y, size: 10, font, color: gray });
-      page.drawText(`Status: ${bill.status}`, { x: 250, y, size: 10, font: fontBold, color: bill.status === 'PAID' ? rgb(0, 0.5, 0) : rgb(0.8, 0, 0) });
-
-      // Footer
-      page.drawLine({ start: { x: 50, y: 80 }, end: { x: 545, y: 80 }, thickness: 0.5, color: gray });
-      page.drawText('Thank you for choosing our services.', { x: 50, y: 60, size: 9, font, color: gray });
-      page.drawText('HSN: 999315 | GSTIN: As applicable', { x: 50, y: 46, size: 8, font, color: gray });
-
-      const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${bill.billNo}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const priced = bill.lines.length > 0 && bill.lines.every(l => l.price != null) &&
+        Math.abs(bill.lines.reduce((sum, l) => sum + (l.price || 0), 0) - bill.subtotal) < 0.5;
+      const rows: unknown[][] = bill.lines.map(l => [l.name, priced ? rupees(l.price || 0) : '']);
+      rows.push(['Subtotal', rupees(bill.subtotal)]);
+      if (bill.discount > 0) rows.push(['Discount', `- ${rupees(bill.discount)}`]);
+      if (bill.gst > 0) rows.push([`GST (${bill.gstPercent}%)`, rupees(bill.gst)]);
+      const bytes = await makeTablePdf({
+        title: 'Bill / Receipt',
+        subtitle: `${bill.billNo}  |  ${bill.date}  |  ${bill.patient} (${bill.patientId})`,
+        columns: [{ header: 'Test / Service', width: 4 }, { header: 'Amount', width: 1, align: 'right' }],
+        rows,
+        totals: ['Total', rupees(bill.total)],
+        lab: bill.lab,
+        notes: [
+          `Paid ${rupees(bill.paid)} (${bill.method})${bill.due > 0 ? `   |   Due ${rupees(bill.due)}` : ''}   |   ${bill.status}`,
+          'Thank you for choosing our services.',
+        ],
+      });
+      downloadPdf(bytes, `${bill.billNo}.pdf`);
       setToast({ message: `Invoice ${bill.billNo} downloaded`, type: 'success' });
     } catch (err) {
+      console.error(err);
       setToast({ message: 'Failed to generate PDF', type: 'error' });
     }
   };

@@ -164,6 +164,57 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect.poll(() => page.locator('input').evaluateAll(els => els.map(e => (e as HTMLInputElement).value)), { timeout: 15_000 }).toContain('9.1');
   });
 
+  test('reports: approved reports keep the lab details they were approved with; new reports get the new ones', async () => {
+    const reportOf = async (patientName: string) => {
+      const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: patientName } }, orderBy: { id: 'desc' }, include: { report: true } });
+      return { order, data: order.report?.snapshot ? JSON.parse(order.report.snapshot) : null };
+    };
+    const rajesh = await reportOf('Rajesh Kumar');
+    expect(rajesh.order.status).toBe('APPROVED');
+    expect(rajesh.data.lab.address).toBe('Main Road, Ranchi');
+
+    // The analyzer's order waits on the Reports screen; approve it there.
+    await go(page, '/reports');
+    const row = (name: string) => page.locator('div.rounded-xl.border.p-4', { hasText: name });
+    await row('Sunita Devi').getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByText('Report approved for Sunita Devi')).toBeVisible();
+    expect((await reportOf('Sunita Devi')).data.lab.address).toBe('Main Road, Ranchi');
+
+    // The lab moves.
+    await go(page, '/settings');
+    await page.locator('textarea').first().fill('Station Road, Dumka');
+    await page.getByRole('button', { name: 'Save Settings' }).click();
+    await expect(page.getByText('Lab Profile saved successfully!')).toBeVisible();
+    expect((await reportOf('Rajesh Kumar')).data).toEqual(rajesh.data);
+    expect((await reportOf('Sunita Devi')).data.lab.address).toBe('Main Road, Ranchi');
+
+    // Preview shows the real PDF; Print downloads it.
+    await go(page, '/reports');
+    await row('Rajesh Kumar').getByRole('button', { name: 'Preview' }).click();
+    await expect(page.getByTitle('Report PDF')).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    const pdf = path.join(dataDir, 'downloads', `${rajesh.order.orderNo}-report.pdf`);
+    fs.rmSync(pdf, { force: true });
+    await row('Rajesh Kumar').getByRole('button', { name: 'Print' }).click();
+    await expect.poll(() => fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 5).toString(), { timeout: 20_000 }).toBe('%PDF-');
+
+    // The next report carries the new address.
+    await registerPatient(page, 'Kavita Singh', '30');
+    await page.locator('input[placeholder="Enter result value"]:not([readonly])').nth(0).fill('13.1');
+    await page.getByRole('button', { name: 'Save Results & Generate Report' }).click();
+    await expect(page.getByText(/registered successfully under order ID/)).toBeVisible();
+    expect((await reportOf('Kavita Singh')).data.lab.address).toBe('Station Road, Dumka');
+
+    // The bill PDF downloads with the price charged for each test.
+    const bill = await dbQuery(page, 'bill', 'findFirst', { where: { patient: { name: 'Rajesh Kumar' } }, include: { orders: { include: { items: true } } } });
+    expect(bill.orders[0].items[0].price).toBeGreaterThan(0);
+    expect(JSON.parse(bill.lab).address).toBe('Main Road, Ranchi'); // made before the move
+    await go(page, '/billing');
+    await page.locator('tr', { hasText: bill.billNo }).getByTitle('Print').click();
+    const invoice = path.join(dataDir, 'downloads', `${bill.billNo}.pdf`);
+    await expect.poll(() => fs.existsSync(invoice) && fs.readFileSync(invoice).subarray(0, 5).toString(), { timeout: 20_000 }).toBe('%PDF-');
+  });
+
   test('data survives an app restart', async () => {
     await app.close();
     ({ app, page } = await launchApp('lab-day', {}, { fresh: false }));

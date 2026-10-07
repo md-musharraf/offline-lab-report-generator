@@ -24,6 +24,14 @@ CREATE TABLE "LabSettings" (
     "pathologyDoctorSignature" BLOB,
     "stamp" BLOB,
     "printHeader" TEXT,
+    "nablNumber" TEXT,
+    "printShowLogo" BOOLEAN NOT NULL DEFAULT true,
+    "printShowQR" BOOLEAN NOT NULL DEFAULT true,
+    "printSignatures" BOOLEAN NOT NULL DEFAULT true,
+    "letterhead" BOOLEAN NOT NULL DEFAULT false,
+    "letterheadTopMm" INTEGER NOT NULL DEFAULT 40,
+    "letterheadBottomMm" INTEGER NOT NULL DEFAULT 20,
+    "coSigning" BOOLEAN NOT NULL DEFAULT false,
     "licenseKey" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
@@ -164,6 +172,7 @@ CREATE TABLE "TestOrderItem" (
     "orderId" INTEGER NOT NULL,
     "testId" INTEGER NOT NULL,
     "selectedParameters" TEXT,
+    "price" REAL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "enteredBy" INTEGER,
     "verifiedBy" INTEGER,
@@ -208,6 +217,7 @@ CREATE TABLE "Bill" (
     "paymentStatus" TEXT NOT NULL DEFAULT 'UNPAID',
     "referralCommission" REAL,
     "notes" TEXT,
+    "lab" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Bill_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
@@ -230,6 +240,8 @@ CREATE TABLE "Report" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     "orderId" INTEGER NOT NULL,
     "pdfData" BLOB,
+    "snapshot" TEXT,
+    "version" INTEGER NOT NULL DEFAULT 0,
     "printCount" INTEGER NOT NULL DEFAULT 0,
     "approvedBy" INTEGER,
     "approvedAt" DATETIME,
@@ -238,6 +250,13 @@ CREATE TABLE "Report" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Report_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "TestOrder" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "ReportAsset" (
+    "hash" TEXT NOT NULL PRIMARY KEY,
+    "data" BLOB NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateTable

@@ -135,7 +135,7 @@ test('ASTM over TCP: handshake, per-frame ACK, NAK on bad checksum, ETB continua
   assert.equal(byValue[10.2].flag, '↓');
   assert.equal(byValue[10.2].isAbnormal, true);
   const order = await prisma.testOrder.findFirst({ where: { barcodeData: 'BC1001' } });
-  assert.equal(order.status, 'ENTERED');
+  assert.equal(order.status, 'RESULT_ENTERED', 'same status as manual entry, so it is listed under Results and Reports');
   dev.close();
 });
 

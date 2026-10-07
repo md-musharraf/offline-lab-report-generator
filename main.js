@@ -201,7 +201,6 @@ const route = async (method, name, body) => (await api.callRoute(ctx, method, na
 const dbUnavailable = () => ({ success: false, error: `Database is not initialized. Error: ${dbError}` });
 
 ipcMain.handle('ping', () => 'pong');
-ipcMain.handle('generate-qrcode', (_e, data) => api.reportQrPng(data));
 
 ipcMain.handle('db-query', async (_e, payload) => {
   if (!prisma) return dbUnavailable();

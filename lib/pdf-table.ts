@@ -30,9 +30,11 @@ export async function makeTablePdf(opts: {
   columns: PdfColumn[];
   rows: unknown[][];
   totals?: unknown[];
+  notes?: string[]; // lines printed under the table
+  lab?: { labName?: string; address?: string; mobile?: string; gstNumber?: string } | null; // default: current Settings
   landscape?: boolean;
 }): Promise<Uint8Array> {
-  const lab = await db.query('labSettings', 'findFirst', { where: { id: 1 } }).catch(() => null);
+  const lab = opts.lab || (await db.query('labSettings', 'findFirst', { where: { id: 1 } }).catch(() => null));
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -55,7 +57,7 @@ export async function makeTablePdf(opts: {
     pages.push(page);
     y = H - M;
     page.drawText(clean(lab?.labName || 'JharLab'), { x: M, y: y - 12, size: 14, font: bold, color: blue });
-    const contact = [lab?.address, lab?.mobile && `Ph: ${lab.mobile}`].filter(Boolean).join('  |  ');
+    const contact = [lab?.address, lab?.mobile && `Ph: ${lab.mobile}`, lab?.gstNumber && `GSTIN: ${lab.gstNumber}`].filter(Boolean).join('  |  ');
     if (contact) page.drawText(fit(clean(contact), font, 8, W - 2 * M), { x: M, y: y - 25, size: 8, font, color: muted });
     y -= 44;
     if (first) {
@@ -98,6 +100,15 @@ export async function makeTablePdf(opts: {
     }
     page.drawLine({ start: { x: M, y: y + 3 }, end: { x: W - M, y: y + 3 }, thickness: 1, color: ink });
     drawRow(opts.totals, bold, size);
+  }
+  for (const note of opts.notes || []) {
+    if (y < M + 40) {
+      page = doc.addPage([W, H]);
+      header(false);
+    }
+    y -= 4;
+    page.drawText(fit(clean(note), font, 8.5, W - 2 * M), { x: M + 4, y: y - 10, size: 8.5, font, color: muted });
+    y -= 12;
   }
 
   const stamp = `Generated ${new Date().toLocaleString('en-IN')} by JharLab`;

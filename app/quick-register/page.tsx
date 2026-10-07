@@ -5,7 +5,9 @@ import { db } from '@/lib/db';
 import { nextNumber } from '@/lib/numbers';
 import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
-import { generateReportPDF, buildReportDataFromDb } from '@/lib/report-pdf';
+import { can } from '@/lib/roles';
+import { postApi } from '@/components/kit';
+import { downloadReportPdf, reportPdfUrl, ReportPreview } from '@/components/ReportPreview';
 import { AppLayout } from '@/components/AppLayout';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -51,7 +53,6 @@ function QuickRegisterContent() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [labSettings, setLabSettings] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(false);
 
   // Pre-loaded catalogs
@@ -186,21 +187,6 @@ function QuickRegisterContent() {
         setTests(testsList || []);
         setAllPatients(patientsList || []);
 
-        // Load lab profile settings
-        const settings = await db.query('labSettings', 'findFirst', { where: { id: 1 } });
-        let mergedSettings = settings || {};
-        if (typeof window !== 'undefined') {
-          const stored = localStorage.getItem('pathology_lab_general_settings');
-          if (stored) {
-            try {
-              const parsed = JSON.parse(stored);
-              mergedSettings = { ...mergedSettings, ...parsed };
-            } catch (e) {
-              console.error('Failed to parse general settings', e);
-            }
-          }
-        }
-        setLabSettings(mergedSettings);
 
         if (initialPatientId && patientsList) {
           const matchedPatient = patientsList.find((p: any) => p.id === initialPatientId);
@@ -299,9 +285,9 @@ function QuickRegisterContent() {
     'rbs': 'BIO007'
   };
 
-  // Billing Calculation Helper
-  const billingCalculations = useMemo(() => {
-    const subtotal = selectedTests.reduce((sum, t) => {
+  // What one selected test costs: the panel price, or less when only some parameters were picked and each
+  // has its own standalone test. Stored on the order item, so later price changes do not alter old bills.
+  const priceOf = (t: any) => {
       let testPrice = t.price;
       const testParams = t.parameters || [];
       const selectedParamsForTest = selectedParameters[t.id] || [];
@@ -340,9 +326,12 @@ function QuickRegisterContent() {
           testPrice = Math.min(standaloneSum, t.price);
         }
       }
+      return testPrice;
+  };
 
-      return sum + testPrice;
-    }, 0);
+  // Billing Calculation Helper
+  const billingCalculations = useMemo(() => {
+    const subtotal = selectedTests.reduce((sum, t) => sum + priceOf(t), 0);
 
 
     const discountAmount = discountType === 'FLAT' 
@@ -674,6 +663,7 @@ function QuickRegisterContent() {
           items: {
             create: selectedTests.map(t => ({
               testId: t.id,
+              price: priceOf(t),
               selectedParameters: selectedParameters[t.id]?.join(',') || null
             }))
           }
@@ -928,21 +918,14 @@ function QuickRegisterContent() {
         }
       }
 
-      // Update Order Status to APPROVED to verify pathologists approval
-      await db.query('testOrder', 'update', {
-        where: { id: createdOrder.id },
-        data: { status: 'APPROVED' }
-      });
-
-      // Save Report entry
-      await db.query('report', 'create', {
-        data: {
-          orderId: createdOrder.id,
-          approvedBy: 1,
-          approvedAt: new Date().toISOString(),
-          printCount: 0
-        }
-      });
+      // Approve (and freeze) the report when results were entered and this user may approve; otherwise it
+      // waits on the Reports screen for whoever approves.
+      const anyResults = Object.values(parameterResults).some((r: any) => r && r.value !== '');
+      if (anyResults && can(currentUser?.role, 'report:approve')) {
+        await postApi('reports/approve', { orderId: createdOrder.id });
+      } else if (anyResults) {
+        await db.query('testOrder', 'update', { where: { id: createdOrder.id }, data: { status: 'RESULT_ENTERED' } });
+      }
 
       // Refresh final order record to compile the correct PDF
       const finalOrder = await db.query('testOrder', 'findUnique', {
@@ -980,41 +963,21 @@ function QuickRegisterContent() {
   const downloadReport = async () => {
     if (!createdOrder) return;
     try {
-      const reportData = buildReportDataFromDb(createdOrder, labSettings);
-      const pdfBytes = await generateReportPDF(reportData);
-      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${createdOrder.orderNo}-report.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
+      await downloadReportPdf([createdOrder.id], `${createdOrder.orderNo}-report.pdf`);
       setToast({ message: "PDF Downloaded!", type: "success" });
-    } catch (err) {
-      console.error(err);
-      setToast({ message: "Failed to download PDF.", type: "error" });
+    } catch (err: any) {
+      setToast({ message: err.message || "Failed to download PDF.", type: "error" });
     }
   };
 
   const printReport = async () => {
     if (!createdOrder) return;
     try {
-      const reportData = buildReportDataFromDb(createdOrder, labSettings);
-      const pdfBytes = await generateReportPDF(reportData);
-      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      
-      // Open in a new window/tab for easy offline printing
-      window.open(url, '_blank');
-      
+      // Opens in the PDF viewer, which has the print button.
+      window.open(await reportPdfUrl([createdOrder.id]), '_blank');
       setToast({ message: "Opening print preview...", type: "success" });
-    } catch (err) {
-      console.error(err);
-      setToast({ message: "Failed to print PDF.", type: "error" });
+    } catch (err: any) {
+      setToast({ message: err.message || "Failed to print PDF.", type: "error" });
     }
   };
 
@@ -1973,129 +1936,16 @@ function QuickRegisterContent() {
       </div>
 
       {/* Preview Modal */}
-      {showPreview && createdOrder && (() => {
-        const data = buildReportDataFromDb(createdOrder, labSettings);
-        return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in" onClick={() => setShowPreview(false)}>
-            <div className="bg-card border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[85vh] overflow-y-auto animate-fade-in-up" onClick={(e) => e.stopPropagation()}>
-              {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-foreground">Report Preview</h2>
-                <button onClick={() => setShowPreview(false)} className="rounded-lg p-1 hover:bg-accent text-muted-foreground hover:text-foreground">
-                  <XIcon className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Lab Header */}
-              <div className="rounded-lg bg-primary/10 p-4 mb-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  {data.printShowLogo && data.logo && (
-                    <div className="h-16 w-16 bg-white rounded-lg p-1 border flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-                      <img src={data.logo} className="h-full w-full object-contain" alt="Lab Logo" />
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="text-base font-bold text-primary">{data.labName.toUpperCase()}</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">{data.labAddress}</p>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1 font-medium">
-                      {data.labMobile && <span>Phone: {data.labMobile}</span>}
-                      {data.labEmail && <span>Email: {data.labEmail}</span>}
-                      {data.labWebsite && <span>Web: {data.labWebsite}</span>}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5 font-medium">
-                      {data.gstNumber && <span>GSTIN: {data.gstNumber}</span>}
-                      {data.registrationNo && <span>Reg No: {data.registrationNo}</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className="inline-flex rounded-full bg-primary/20 text-primary px-3 py-1 text-xs font-bold uppercase tracking-wider">
-                    Pathology Report
-                  </span>
-                </div>
-              </div>
-
-              {/* Patient Info */}
-              <div className="rounded-lg border p-4 mb-4 grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Patient Name:</span> <span className="font-semibold">{data.patientName}</span></div>
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Order No:</span> <span className="font-semibold font-mono">{data.orderNo}</span></div>
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Patient ID:</span> <span className="font-semibold">{data.patientId}</span></div>
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Date:</span> <span className="font-semibold">{data.date}</span></div>
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Age / Gender:</span> <span className="font-semibold">{data.age} / {data.gender}</span></div>
-                <div><span className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">Referred By:</span> <span className="font-semibold">{data.referredBy}</span></div>
-              </div>
-
-              {/* Test Results */}
-              {data.tests.map((test, ti) => (
-                <div key={ti} className="mb-4">
-                  <div className="rounded-t-lg bg-primary px-3 py-2">
-                    <h4 className="text-sm font-bold text-primary-foreground">{test.testName}</h4>
-                  </div>
-                  <div className="border border-t-0 rounded-b-lg overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-muted/50">
-                          <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground">Parameter</th>
-                          <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground">Result</th>
-                          <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground">Unit</th>
-                          <th className="text-left px-3 py-1.5 font-semibold text-muted-foreground">Reference</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {test.parameters.map((p, pi) => (
-                          <tr key={pi} className={p.isHeader ? 'bg-muted/30' : 'border-t border-border/50'}>
-                            <td className={`px-3 py-1.5 ${p.isHeader ? 'font-bold' : ''}`}>{p.name}</td>
-                            {p.isHeader ? (
-                              <td colSpan={3}></td>
-                            ) : (
-                              <>
-                                <td className={`px-3 py-1.5 font-semibold ${p.flag === '↑' || p.flag === 'H' ? 'text-orange-600 dark:text-orange-400' : p.flag === '↓' || p.flag === 'L' ? 'text-blue-600 dark:text-blue-400' : p.flag === '!!' ? 'text-red-600 dark:text-red-400' : ''}`}>
-                                  {p.value}{p.flag ? ` ${p.flag === '↑' ? 'H' : p.flag === '↓' ? 'L' : p.flag}` : ''}
-                                </td>
-                                <td className="px-3 py-1.5 text-muted-foreground">{p.unit}</td>
-                                <td className="px-3 py-1.5 text-muted-foreground">{p.refRange}</td>
-                              </>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-
-              {/* Footer */}
-              <div className="border-t pt-3 mt-2 flex items-center justify-between text-xs text-muted-foreground font-sans">
-                <p className="italic">This is a computer-generated report. Results should be correlated clinically.</p>
-                <div className="text-right">
-                  {data.approvedBy !== 'Draft Report (Pending Approval)' ? (
-                    <>
-                      <p className="font-bold text-foreground text-sm">{data.approvedBy}</p>
-                      <p className="italic text-xs">{data.doctorQualification || 'Pathologist'}</p>
-                      {data.doctorRegNo && <p className="text-[10px] text-muted-foreground mt-0.5">Reg No: {data.doctorRegNo}</p>}
-                    </>
-                  ) : (
-                    <p className="text-red-500 font-bold italic">{data.approvedBy}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 mt-4 pt-3 border-t">
-                <button onClick={downloadReport} className="flex items-center gap-1.5 bg-primary px-5 py-2.5 text-sm font-bold rounded-xl text-primary-foreground hover:bg-primary/90 transition-colors">
-                  <Download className="h-4 w-4" />Download PDF
-                </button>
-                <button onClick={printReport} className="flex items-center gap-1.5 bg-primary px-5 py-2.5 text-sm font-bold rounded-xl text-primary-foreground hover:bg-primary/90 transition-colors">
-                  <Printer className="h-4 w-4" />Print PDF
-                </button>
-                <button onClick={() => setShowPreview(false)} className="ml-auto border px-5 py-2.5 text-sm font-bold rounded-xl hover:bg-accent text-foreground transition-colors">
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {showPreview && createdOrder && (
+        <ReportPreview orderId={createdOrder.id} title={`${createdOrder.patient?.name || ''} · ${createdOrder.orderNo}`} onClose={() => setShowPreview(false)}>
+          <button onClick={downloadReport} className="flex items-center gap-1.5 bg-primary px-5 py-2.5 text-sm font-bold rounded-xl text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Download className="h-4 w-4" />Download PDF
+          </button>
+          <button onClick={printReport} className="flex items-center gap-1.5 bg-primary px-5 py-2.5 text-sm font-bold rounded-xl text-primary-foreground hover:bg-primary/90 transition-colors">
+            <Printer className="h-4 w-4" />Print PDF
+          </button>
+        </ReportPreview>
+      )}
     </AppLayout>
   );
 }
