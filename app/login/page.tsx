@@ -7,6 +7,8 @@ import { db } from '../../lib/db';
 import { useEnterAsTab } from '../../lib/useEnterAsTab';
 import { RecoveryCode } from '../../components/kit';
 
+const LAST_EMAIL_KEY = 'jharlab_last_login_email';
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +26,12 @@ export default function LoginPage() {
   useEffect(() => {
     localStorage.removeItem('pathology_lab_current_user');
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    // The last login email is remembered on this PC (passwords never are).
+    const lastEmail = localStorage.getItem(LAST_EMAIL_KEY);
+    if (lastEmail) {
+      setEmail(lastEmail);
+      document.getElementById('login-password')?.focus();
+    }
 
     async function checkSetup() {
       try {
@@ -108,6 +116,7 @@ export default function LoginPage() {
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.success) {
         localStorage.setItem('pathology_lab_current_user', JSON.stringify(data.user));
+        localStorage.setItem(LAST_EMAIL_KEY, data.user.email);
         router.push('/dashboard');
         return;
       }

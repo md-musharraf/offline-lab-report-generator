@@ -7,9 +7,9 @@ import { can } from '@/lib/roles';
 // Real backups of the lab database (SQLite VACUUM INTO copies), made by the backend:
 // automatically once a day (14 kept), on demand, or saved to any folder / pendrive. Restore is owner/admin only.
 
-type Backup = { name: string; file: string; sizeBytes: number; createdAt: string; type: 'AUTO' | 'MANUAL' | 'SAFETY' };
+type Backup = { name: string; file: string; sizeBytes: number; createdAt: string; type: 'AUTO' | 'MANUAL' | 'SAFETY' | 'UPDATE' };
 
-const TYPE_LABEL: Record<Backup['type'], string> = { AUTO: 'Automatic (daily)', MANUAL: 'Manual', SAFETY: 'Safety copy before a restore' };
+const TYPE_LABEL: Record<Backup['type'], string> = { AUTO: 'Automatic (daily)', MANUAL: 'Manual', SAFETY: 'Safety copy before a restore', UPDATE: 'Copy before an app update' };
 const size = (b: number) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 const electron = () => (typeof window !== 'undefined' ? (window as any).electronAPI : null);
 

@@ -11,6 +11,10 @@ const machineServer = require('./lib/machineServer');
 // JHARLAB_USER_DATA gives tests (and portable installs) an isolated profile + database.
 if (process.env.JHARLAB_USER_DATA) app.setPath('userData', path.resolve(process.env.JHARLAB_USER_DATA));
 const userData = app.getPath('userData');
+// Dev keeps using prisma/dev.db (and prisma/backups); installs and isolated profiles keep both in userData,
+// so a developer's test data never lands among a real lab's backups.
+const useRepoDb = !app.isPackaged && !process.env.JHARLAB_USER_DATA;
+const dataDir = useRepoDb ? path.join(__dirname, 'prisma') : userData;
 
 // Serve the static export (out/) unless running against `next dev`. JHARLAB_STATIC=1 serves out/ unpackaged.
 const serveStatic = app.isPackaged || process.env.JHARLAB_STATIC === '1';
@@ -32,10 +36,11 @@ let prisma = null;
 let dbError = null;
 let PrismaClient = null;
 let dbFile = null;
+let recoveredFrom = null;
 // Shared by IPC and the app:// API: who is signed in, and a hook that tells the screens data changed.
 const ctx = {
   prisma: null,
-  dataDir: userData,
+  dataDir,
   session: null,
   notify: model => mainWindow?.webContents.send('db-changed', model),
 };
@@ -48,12 +53,14 @@ async function initDatabase() {
     if (engine) process.env.PRISMA_QUERY_ENGINE_LIBRARY = path.join(clientDir, engine);
     ({ PrismaClient } = require(clientDir));
 
-    // Dev keeps using prisma/dev.db; installs and isolated profiles keep the database in userData.
-    const useRepoDb = !app.isPackaged && !process.env.JHARLAB_USER_DATA;
-    dbFile = useRepoDb ? path.join(__dirname, 'prisma', 'dev.db') : path.join(userData, 'dev.db');
+    dbFile = path.join(dataDir, 'dev.db');
+    // A lost database is brought back from the newest backup / an older install, never replaced by an empty lab.
+    if (!useRepoDb) recoveredFrom = api.recoverMissingDatabase(dbFile, dataDir);
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
     prisma = new PrismaClient({ datasources: { db: { url: `file:${dbFile.replace(/\\/g, '/')}` } } });
-    await api.ensureSchema(prisma, fs.readFileSync(path.join(resourcesDir, 'prisma', 'schema.sql'), 'utf8'));
+    const sql = fs.readFileSync(path.join(resourcesDir, 'prisma', 'schema.sql'), 'utf8');
+    const upgraded = await api.upgradeDatabase(prisma, sql, { dataDir, version: app.getVersion() });
+    if (upgraded.backup) console.log('Copy of the database saved before this update:', upgraded.backup);
     ctx.prisma = prisma;
     console.log('Database ready:', dbFile);
     // Daily automatic backup (kept 14 days), checked at start-up and every 6 hours.
@@ -171,6 +178,14 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     machineServer.initMachineServer(prisma, () => mainWindow, userData);
     if (dbError) dialog.showErrorBox('JharLab could not open its database', dbError);
+    if (recoveredFrom) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Lab data restored',
+        message: 'JharLab could not find its database, so it restored your most recent lab data. Please check today\'s entries.',
+        detail: `Restored from: ${recoveredFrom}`,
+      });
+    }
   });
 }
 
@@ -257,7 +272,7 @@ ipcMain.handle('backup-export', async () => {
   }
 });
 
-ipcMain.handle('backup-open-folder', () => shell.openPath(path.join(userData, 'backups')));
+ipcMain.handle('backup-open-folder', () => shell.openPath(path.join(dataDir, 'backups')));
 
 // Owner/admin only. Checks the file really is a JharLab database, saves a safety copy of today's data,
 // swaps the database file and restarts the app on it.
@@ -267,7 +282,7 @@ ipcMain.handle('backup-restore', async (_e, file) => {
     if (!file) {
       const r = await dialog.showOpenDialog(mainWindow, {
         title: 'Restore a JharLab backup',
-        defaultPath: path.join(userData, 'backups'),
+        defaultPath: path.join(dataDir, 'backups'),
         filters: [{ name: 'JharLab backup', extensions: ['db'] }],
         properties: ['openFile'],
       });

@@ -13,3 +13,4 @@ playwright-report/
 .e2e-data/
 tsconfig.tsbuildinfo
 trial.json
+prisma/backups/
