@@ -26,9 +26,11 @@ const moduleColors: Record<string, string> = {
   Settings: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
   Backup: 'bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-400',
   Staff: 'bg-teal-100 text-teal-700 dark:bg-teal-950/50 dark:text-teal-400',
+  Accounts: 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400',
+  Inventory: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-400',
 };
 
-const ALL_MODULES = ['Patients', 'Billing', 'Samples', 'Results', 'Reports', 'Settings', 'Backup', 'Staff'];
+const ALL_MODULES = ['Patients', 'Billing', 'Samples', 'Results', 'Reports', 'Accounts', 'Inventory', 'Settings', 'Backup', 'Staff'];
 
 /** Helper: parse dd/mm/yyyy to a Date object (midnight). */
 function parseDDMMYYYY(dateStr: string): Date | null {

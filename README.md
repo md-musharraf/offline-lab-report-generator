@@ -100,3 +100,11 @@ the screens:
 A copy of the database is made automatically every day (14 kept in `%APPDATA%\jharlab\backups`), on demand from
 **Backup**, or saved to a pendrive / any folder. Restore (owner/admin only) checks the file, saves a safety copy of
 the current data first, then restarts on the restored data.
+
+### Everything stays on the PC
+
+All data (patients, bills, results, staff, samples, home collections, outsourced tests, corporate clients,
+expenses, stock) lives in one local SQLite file, so it works without internet and is included in every backup.
+PDFs are made on demand on the PC (reports, bills, barcode sample labels, expense statements, stock register,
+outsourcing register, home-collection run sheets); nothing is uploaded. The only online calls are the licence
+check and the update check against the admin dashboard.

@@ -2,9 +2,14 @@
 import { AppLayout } from '@/components/AppLayout';
 import { motion } from 'framer-motion';
 import { useState, useEffect, useCallback } from 'react';
-import { Search, FlaskConical, CheckCircle, XCircle, Clock, AlertTriangle, Printer, QrCode, X } from 'lucide-react';
+import { Search, FlaskConical, CheckCircle, XCircle, Clock, AlertTriangle, Printer, QrCode, X, RotateCcw } from 'lucide-react';
+import { db } from '@/lib/db';
+import { useLive } from '@/components/kit';
 
+// Samples are the lab's real orders: collecting or rejecting one is saved on the order (on this PC).
 interface Sample {
+  id: number;
+  orderStatus: string;
   orderNo: string;
   patient: string;
   patientId: string;
@@ -15,9 +20,30 @@ interface Sample {
   time: string;
   rejectionReason?: string;
   collectedAt?: string;
+  collectedToday?: boolean;
 }
 
-const initialSamples: Sample[] = [];
+const REJECT_PREFIX = 'Sample rejected: ';
+const clock = (d: string | Date) => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+const isToday = (d?: string | Date | null) => !!d && new Date(d).toDateString() === new Date().toDateString();
+
+function toSample(o: any): Sample {
+  return {
+    id: o.id,
+    orderStatus: o.status,
+    orderNo: o.orderNo,
+    patient: o.patient?.name || '—',
+    patientId: o.patientId,
+    tests: (o.items || []).map((i: any) => i.test?.shortName || i.test?.name).filter(Boolean),
+    container: Array.from(new Set((o.items || []).map((i: any) => i.test?.container).filter(Boolean))).join(', ') || '—',
+    priority: o.priority || 'ROUTINE',
+    status: o.status === 'REJECTED' ? 'REJECTED' : o.collectedAt ? 'COLLECTED' : 'PENDING',
+    time: clock(o.createdAt),
+    rejectionReason: o.note?.startsWith(REJECT_PREFIX) ? o.note.slice(REJECT_PREFIX.length) : undefined,
+    collectedAt: o.collectedAt ? clock(o.collectedAt) : undefined,
+    collectedToday: isToday(o.collectedAt),
+  };
+}
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   PENDING: { icon: Clock, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-950/50' },
@@ -44,7 +70,19 @@ const REJECTION_REASONS = [
 ];
 
 export default function SamplesPage() {
-  const [samples, setSamples] = useState<Sample[]>(initialSamples);
+  const [samples, setSamples] = useState<Sample[]>([]);
+
+  // Last 3 days plus anything still waiting for collection.
+  const loadSamples = () => {
+    const since = new Date(Date.now() - 3 * 864e5);
+    return db.query('testOrder', 'findMany', {
+      where: { OR: [{ createdAt: { gte: since } }, { collectedAt: null, status: { in: ['PENDING', 'REJECTED'] } }] },
+      include: { patient: true, items: { include: { test: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    }).then((orders: any[]) => setSamples(orders.map(toSample))).catch((err: any) => setToast({ message: err.message, type: 'error' }));
+  };
+  useLive(loadSamples, ['testOrder', 'patient']);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -64,24 +102,37 @@ export default function SamplesPage() {
   }, [toast]);
 
   const filtered = samples.filter(s => {
-    const matchSearch = s.patient.toLowerCase().includes(search.toLowerCase()) || s.orderNo.toLowerCase().includes(search.toLowerCase());
+    const q = search.trim().toLowerCase();
+    const matchSearch = !q || s.patient.toLowerCase().includes(q) || s.orderNo.toLowerCase().includes(q) || s.patientId.toLowerCase().includes(q);
     const matchFilter = filter === 'ALL' || s.status === filter;
     return matchSearch && matchFilter;
   });
 
   // Compute stats from state
   const pendingCount = samples.filter(s => s.status === 'PENDING').length;
-  const collectedCount = samples.filter(s => s.status === 'COLLECTED').length;
+  const collectedCount = samples.filter(s => s.status === 'COLLECTED' && s.collectedToday).length;
   const rejectedCount = samples.filter(s => s.status === 'REJECTED').length;
 
-  // Collect handler
-  const handleCollect = useCallback((orderNo: string) => {
-    const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-    setSamples(prev => prev.map(s =>
-      s.orderNo === orderNo ? { ...s, status: 'COLLECTED', collectedAt: now } : s
-    ));
-    setToast({ message: `Sample ${orderNo} collected successfully`, type: 'success' });
-  }, []);
+  // Collect: stamp the collection time; the order number becomes the tube barcode analyzers read.
+  const handleCollect = useCallback(async (orderNo: string) => {
+    const sample = samples.find(x => x.orderNo === orderNo);
+    if (!sample) return;
+    try {
+      await db.query('testOrder', 'update', {
+        where: { id: sample.id },
+        data: {
+          collectedAt: new Date(),
+          barcodeData: orderNo,
+          ...(['PENDING', 'REJECTED'].includes(sample.orderStatus) ? { status: 'COLLECTED', note: null } : {}),
+        },
+      });
+      setToast({ message: `Sample ${orderNo} collected`, type: 'success' });
+      loadSamples();
+    } catch (err: any) {
+      setToast({ message: err.message, type: 'error' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [samples]);
 
   // Open reject modal
   const openRejectModal = useCallback((orderNo: string) => {
@@ -92,18 +143,25 @@ export default function SamplesPage() {
   }, []);
 
   // Submit rejection
-  const submitRejection = useCallback(() => {
+  const submitRejection = useCallback(async () => {
     const finalReason = rejectionReason === 'Other' ? customReason : rejectionReason;
     if (!finalReason.trim()) {
       setToast({ message: 'Please select or enter a rejection reason', type: 'error' });
       return;
     }
-    setSamples(prev => prev.map(s =>
-      s.orderNo === rejectOrderNo ? { ...s, status: 'REJECTED', rejectionReason: finalReason } : s
-    ));
+    const sample = samples.find(x => x.orderNo === rejectOrderNo);
+    if (!sample) return;
+    try {
+      await db.query('testOrder', 'update', { where: { id: sample.id }, data: { status: 'REJECTED', collectedAt: null, note: `${REJECT_PREFIX}${finalReason}` } });
+      loadSamples();
+    } catch (err: any) {
+      setToast({ message: err.message, type: 'error' });
+      return;
+    }
     setShowRejectModal(false);
     setToast({ message: `Sample ${rejectOrderNo} rejected — ${finalReason}`, type: 'success' });
-  }, [rejectOrderNo, rejectionReason, customReason]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectOrderNo, rejectionReason, customReason, samples]);
 
   // Print Label handler — generates a small PDF label using pdf-lib
   const handlePrintLabel = useCallback(async (sample: Sample) => {
@@ -123,7 +181,7 @@ export default function SamplesPage() {
       page.drawText(`Order: ${sample.orderNo}`, { x: 10, y: 112, size: 8, font: fontBold, color: rgb(0, 0, 0) });
 
       // Patient
-      page.drawText(`Patient: ${sample.patient}`, { x: 10, y: 98, size: 7, font, color: rgb(0, 0, 0) });
+      page.drawText(`Patient: ${sample.patient.replace(/[^\x20-\xFF]/g, '?')}`, { x: 10, y: 98, size: 7, font, color: rgb(0, 0, 0) });
       page.drawText(`ID: ${sample.patientId}`, { x: 10, y: 86, size: 7, font, color: rgb(0, 0, 0) });
 
       // Tests
@@ -138,17 +196,22 @@ export default function SamplesPage() {
 
       // Priority badge
       if (sample.priority === 'URGENT' || sample.priority === 'EMERGENCY') {
-        page.drawText(`⚠ ${sample.priority}`, { x: 200, y: 126, size: 8, font: fontBold, color: rgb(0.8, 0.1, 0.1) });
+        page.drawText(`!! ${sample.priority}`, { x: 200, y: 126, size: 8, font: fontBold, color: rgb(0.8, 0.1, 0.1) });
       }
 
-      // Barcode text representation
-      page.drawText(`|||| ${sample.orderNo} ||||`, { x: 10, y: 18, size: 8, font, color: rgb(0, 0, 0) });
+      // Scannable Code 128 barcode of the order number
+      const res = await fetch('/api/barcode/png', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: sample.orderNo }) });
+      if (!res.ok) throw new Error('Barcode could not be generated');
+      const barcode = await pdfDoc.embedPng(new Uint8Array(await res.arrayBuffer()));
+      page.drawImage(barcode, { x: 10, y: 8, width: 268, height: 36 });
 
-      // Save and open
+      // Save and download (opens with the PC's PDF viewer / label printer driver)
       const pdfBytes = await pdfDoc.save();
-      const blob = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      const url = URL.createObjectURL(new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `label-${sample.orderNo}.pdf`;
+      a.click();
       setToast({ message: `Label PDF generated for ${sample.orderNo}`, type: 'success' });
     } catch (err) {
       console.error('Label generation error:', err);
@@ -265,17 +328,24 @@ export default function SamplesPage() {
                         </>
                       )}
                       {s.status === 'COLLECTED' && (
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sc.bg} ${sc.color}`}>
-                          ✓ Collected
-                        </span>
+                        <>
+                          <button onClick={() => handlePrintLabel(s)} className="flex items-center gap-1 rounded-lg border px-3.5 py-2 text-xs font-semibold hover:bg-accent transition-colors">
+                            <Printer className="h-4 w-4" />Label
+                          </button>
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sc.bg} ${sc.color}`} title={`Collected ${s.collectedAt || ''}`}>
+                            ✓ Collected {s.collectedAt}
+                          </span>
+                        </>
                       )}
                       {s.status === 'REJECTED' && (
-                        <span 
-                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sc.bg} ${sc.color}`} 
-                          title={s.rejectionReason}
-                        >
-                          ✗ Rejected
-                        </span>
+                        <>
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sc.bg} ${sc.color}`} title={s.rejectionReason}>
+                            ✗ Rejected{s.rejectionReason ? `: ${s.rejectionReason}` : ''}
+                          </span>
+                          <button onClick={() => handleCollect(s.orderNo)} className="flex items-center gap-1 rounded-lg bg-green-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-green-700 transition-colors">
+                            <RotateCcw className="h-4 w-4" />Re-collect
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

@@ -2,9 +2,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Mail, ArrowRight, Activity, Shield, Users, FlaskConical, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Activity, Shield, Users, FlaskConical, AlertCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { db } from '../../lib/db';
 import { useEnterAsTab } from '../../lib/useEnterAsTab';
+import { RecoveryCode } from '../../components/kit';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [labName, setLabName] = useState('');
+  const [recovering, setRecovering] = useState(false);
   const router = useRouter();
 
   // Global Enter key behaves like Tab
@@ -151,6 +153,17 @@ export default function LoginPage() {
           transition={{ duration: 0.25 }}
           className="w-full max-w-sm"
         >
+          {recovering ? (
+            <RecoverPanel
+              onBack={recoveredEmail => {
+                if (recoveredEmail) setEmail(recoveredEmail);
+                setPassword('');
+                setError(null);
+                setRecovering(false);
+              }}
+            />
+          ) : (
+          <>
           <h2 className="text-2xl font-semibold tracking-tight">Sign in</h2>
           <p className="mb-6 mt-1 text-sm text-muted-foreground">Use the account your lab owner created for you.</p>
 
@@ -233,6 +246,10 @@ export default function LoginPage() {
             </button>
           </form>
 
+          <button type="button" onClick={() => { setError(null); setRecovering(true); }} className="mt-4 w-full text-center text-sm font-medium text-primary hover:underline">
+            Forgot password or email?
+          </button>
+
           {process.env.NODE_ENV === 'development' && (
             <div className="mt-8 space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Development test accounts</p>
@@ -254,8 +271,90 @@ export default function LoginPage() {
               </div>
             </div>
           )}
+          </>
+          )}
         </motion.div>
       </div>
+    </div>
+  );
+}
+
+// Staff are reset by the owner (Staff screen). The owner uses the recovery code written down at setup;
+// the backend returns the login email with a fresh code, since the old one is now used up.
+function RecoverPanel({ onBack }: { onBack: (email?: string) => void }) {
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<{ email: string; recoveryCode: string } | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code.trim()) return setError('Enter the recovery code');
+    if (newPassword.length < 6) return setError('New password must be at least 6 characters');
+    if (newPassword !== confirm) return setError('Passwords do not match');
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not reset the password');
+      setDone(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-semibold tracking-tight">Password changed</h2>
+        <p className="text-sm text-muted-foreground">Your owner login email is <b className="text-foreground">{done.email}</b>. Your old recovery code no longer works; here is the new one.</p>
+        <RecoveryCode code={done.recoveryCode} continueLabel="Back to sign in" onContinue={() => onBack(done.email)} />
+      </div>
+    );
+  }
+
+  const field = 'w-full rounded-lg border bg-card px-3 text-sm';
+  return (
+    <div>
+      <h2 className="text-2xl font-semibold tracking-tight">Reset password</h2>
+      <div className="mb-5 mt-3 space-y-2 rounded-lg border bg-muted/40 p-3.5 text-sm text-muted-foreground">
+        <p><b className="text-foreground">Staff:</b> ask your lab owner. They can see your login email and set a new password from Staff → Edit.</p>
+        <p><b className="text-foreground">Lab owner:</b> enter the recovery code you wrote down when the lab was set up.</p>
+      </div>
+      {error && (
+        <div role="alert" className="mb-4 flex items-center gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      <form onSubmit={submit} className="space-y-4">
+        <div className="space-y-1.5">
+          <label htmlFor="recover-code" className="text-sm font-medium">Recovery code</label>
+          <input id="recover-code" autoFocus autoComplete="off" spellCheck={false} value={code} onChange={e => setCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX" className={`${field} font-mono uppercase tracking-wider`} />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="recover-password" className="text-sm font-medium">New password</label>
+          <input id="recover-password" type="password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className={field} />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="recover-confirm" className="text-sm font-medium">Confirm new password</label>
+          <input id="recover-confirm" type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} className={field} />
+        </div>
+        <button type="submit" disabled={busy} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60">
+          <KeyRound className="h-4 w-4" />
+          {busy ? 'Checking…' : 'Reset password'}
+        </button>
+      </form>
+      <button type="button" onClick={() => onBack()} className="mt-4 w-full text-center text-sm font-medium text-primary hover:underline">Back to sign in</button>
     </div>
   );
 }

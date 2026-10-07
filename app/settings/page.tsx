@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Building2, Printer, Palette, Bell, Shield, Database, Stethoscope, Wifi, Save, Plus, Trash2, XIcon, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
+import { RecoveryCode, postApi, btnPrimary, btnGhost, inputCls } from '@/components/kit';
 
 function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
   let binary = '';
@@ -673,6 +674,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted-foreground">Staff, their logins, roles and shifts are managed on the Staff screen (lab owner / admin only). Every login has its own password; nobody gets a shared default password.</p>
                   <a href="/staff" className="mt-4 inline-flex h-10 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open Staff & Logins</a>
                 </div>
+                <OwnerRecoveryCard />
               </div>
             )}
 
@@ -923,5 +925,60 @@ export default function SettingsPage() {
         </div>
       )}
     </AppLayout>
+  );
+}
+
+// Owner only: whether a recovery code exists, and making a new one (the old one stops working).
+function OwnerRecoveryCard() {
+  const [status, setStatus] = useState<{ isOwner: boolean; hasCode: boolean } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [code, setCode] = useState('');
+
+  useEffect(() => {
+    fetch('/api/auth/recovery-code').then(r => r.json()).then(setStatus).catch(() => {});
+  }, []);
+  if (!status?.isOwner) return null;
+
+  const make = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    try {
+      setCode((await postApi('auth/recovery-code', { password })).recoveryCode);
+      setStatus({ isOwner: true, hasCode: true });
+      setAsking(false);
+      setPassword('');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-muted/30 p-5">
+      <p className="text-sm font-semibold text-foreground">Owner recovery code</p>
+      <p className="text-sm text-muted-foreground">
+        {status.hasCode
+          ? 'You have a recovery code. If you forget your password, use it on the sign-in screen (Forgot password or email?).'
+          : 'You do not have a recovery code yet. Without one, a forgotten owner password cannot be reset. Make one now and write it down.'}
+      </p>
+      {code ? (
+        <RecoveryCode code={code} continueLabel="Done" onContinue={() => setCode('')} />
+      ) : asking ? (
+        <form onSubmit={make} className="flex flex-wrap items-end gap-2">
+          <label className="min-w-[220px] flex-1">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">Your current password</span>
+            <input type="password" autoFocus autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} className={`${inputCls} h-10`} />
+          </label>
+          <button type="submit" disabled={!password} className={btnPrimary}>Make new code</button>
+          <button type="button" onClick={() => { setAsking(false); setError(''); }} className={btnGhost}>Cancel</button>
+          {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
+        </form>
+      ) : (
+        <button type="button" onClick={() => setAsking(true)} className={status.hasCode ? btnGhost : btnPrimary}>
+          {status.hasCode ? 'Make a new recovery code' : 'Make my recovery code'}
+        </button>
+      )}
+    </div>
   );
 }

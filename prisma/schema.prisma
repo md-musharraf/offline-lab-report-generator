@@ -43,6 +43,7 @@ model User {
   name         String
   email        String    @unique
   password     String    // bcrypt hashed
+  recoveryHash String?   // owner only: bcrypt hash of the one-time recovery code
   role         String    @default("RECEPTIONIST") // Role enum
   isActive     Boolean   @default(true)
   lastLogin    DateTime?
@@ -328,6 +329,7 @@ model InventoryItem {
   expiryDate    DateTime?
   supplierId    Int?
   supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  supplierName  String?  // free-text supplier shown on the stock register
   batchNumber   String?
   purchasePrice Float?
   isActive      Boolean  @default(true)
@@ -401,4 +403,87 @@ model QcResult {
 model Counter {
   key   String @id
   value Int
+}
+
+// Day-to-day lab spending (salaries, reagents, rent, ...) for the monthly profit / loss.
+model Expense {
+  id          Int      @id @default(autoincrement())
+  date        DateTime
+  category    String   // SALARY | REAGENT | RENT | MAINTENANCE | UTILITY | EQUIPMENT | MISC
+  description String
+  amount      Float
+  paidTo      String?
+  method      String   @default("CASH")
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+}
+
+// Sample collection at the patient's home.
+model HomeCollection {
+  id           Int      @id @default(autoincrement())
+  patientName  String
+  phone        String?
+  address      String
+  tests        String?
+  scheduledAt  DateTime
+  status       String   @default("PENDING") // PENDING | ASSIGNED | IN_TRANSIT | COLLECTED | DELIVERED_TO_LAB | CANCELLED
+  assignedTo   Int?     // User.id of the phlebotomist / technician
+  assignedName String?
+  notes        String?
+  createdBy    Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([scheduledAt])
+  @@index([status])
+}
+
+// Partner labs that run tests this lab does not, and the tests sent to them.
+model OutsourceLab {
+  id        Int              @id @default(autoincrement())
+  name      String
+  mobile    String?
+  email     String?
+  address   String?
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  tests     OutsourcedTest[]
+}
+
+model OutsourcedTest {
+  id               Int          @id @default(autoincrement())
+  labId            Int
+  lab              OutsourceLab @relation(fields: [labId], references: [id])
+  patientName      String
+  orderNo          String?
+  testName         String
+  cost             Float        @default(0)
+  sentAt           DateTime     @default(now())
+  status           String       @default("PENDING") // PENDING | COMPLETED | CANCELLED
+  resultReceivedAt DateTime?
+  notes            String?
+  createdBy        Int
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([labId])
+  @@index([sentAt])
+}
+
+// Companies / hospitals billed on credit with an agreed discount.
+model Corporate {
+  id         Int      @id @default(autoincrement())
+  name       String
+  contact    String?
+  mobile     String?
+  email      String?
+  creditDays Int      @default(0)
+  discount   Float    @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }

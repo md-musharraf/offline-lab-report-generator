@@ -85,6 +85,7 @@ test('licence lifecycle driven from the admin dashboard', async () => {
     await page.getByPlaceholder('••••••••').nth(0).fill('Owner@123');
     await page.getByPlaceholder('••••••••').nth(1).fill('Owner@123');
     await page.getByRole('button', { name: /Build Lab/ }).click();
+    await page.getByLabel('I have written down this code').check();
     await page.getByRole('button', { name: 'Launch Dashboard' }).click({ timeout: 60_000 });
     await unlocked();
 

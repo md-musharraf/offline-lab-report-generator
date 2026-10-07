@@ -21,6 +21,7 @@ const denied = (promise, re = /not allowed|sign in/i) => assert.rejects(promise,
 let tech;
 let recep;
 let techUserId;
+let ownerCode;
 
 async function signIn(email, password) {
   const ctx = { prisma, dataDir: tmp, session: null };
@@ -73,6 +74,8 @@ test('first-run setup creates the owner, names the lab, seeds the catalog and si
   });
   assert.equal(res.json.success, true, JSON.stringify(res.json));
   assert.equal(owner.session.user.role, 'SUPER_ADMIN');
+  ownerCode = res.json.recoveryCode;
+  assert.match(ownerCode, /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/, 'setup shows the owner a recovery code');
   assert.equal((await prisma.labSettings.findMany()).length, 1);
   assert.ok((await prisma.test.count()) >= 200);
   assert.equal((await call(owner, 'POST', 'auth/setup', { labName: 'x', mobile: 'x', address: 'x', ownerName: 'x', ownerEmail: 'x@x', ownerPassword: 'x' })).status, 400);
@@ -277,6 +280,76 @@ test('report QR verification URL is signed and the PNG renders', async () => {
   assert.match(res.json.verifyUrl, /\/verify\?p=.+&s=[0-9a-f]{16}$/);
   const png = await call(owner, 'POST', 'reports/qrcode', { orderNo: 'ORD-1', patientName: 'Rajesh', tests: [] });
   assert.deepEqual([...png.body.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
+
+test('expenses, stock, home collections, outsourcing and corporate clients are saved on the PC and stamped', async () => {
+  // Expenses: whoever is signed in is the creator; only the owner may delete one.
+  const exp = await q(tech, 'expense', 'create', { data: { date: new Date(), category: 'REAGENT', description: 'CBC reagent', amount: 500 } });
+  assert.equal(exp.createdBy, techUserId);
+  await denied(q(tech, 'expense', 'delete', { where: { id: exp.id } }));
+  const money = (await call(owner, 'GET', 'dashboard/money')).json;
+  assert.equal(money.visible, true);
+  assert.equal(money.expenses, 500);
+  assert.equal(money.net, money.revenue - 500);
+  assert.equal((await call(tech, 'GET', 'dashboard/money')).json.visible, false, 'profit is for the owner only');
+
+  // Stock: in / out / correction move the balance in one step and keep a history.
+  const item = await q(tech, 'inventoryItem', 'create', { data: { name: 'EDTA tubes', category: 'TUBE', unit: 'pcs', currentStock: 0, minStock: 50 } });
+  assert.equal((await call(tech, 'POST', 'inventory/move', { itemId: item.id, type: 'IN', quantity: 100, note: 'Invoice 42' })).json.item.currentStock, 100);
+  assert.equal((await call(tech, 'POST', 'inventory/move', { itemId: item.id, type: 'OUT', quantity: 70 })).json.item.currentStock, 30);
+  const tooMany = await call(tech, 'POST', 'inventory/move', { itemId: item.id, type: 'OUT', quantity: 31 });
+  assert.equal(tooMany.status, 400);
+  assert.match(tooMany.json.error, /Only 30 pcs in stock/);
+  assert.equal((await call(tech, 'POST', 'inventory/move', { itemId: item.id, type: 'ADJUST', quantity: 28 })).json.item.currentStock, 28);
+  const moves = await prisma.inventoryTransaction.findMany({ where: { itemId: item.id } });
+  assert.deepEqual(moves.map(m => m.type), ['IN', 'OUT', 'ADJUST']);
+  assert.ok(moves.every(m => m.createdBy === techUserId));
+
+  // Home collection, outsourcing and corporate clients.
+  const people = (await call(tech, 'GET', 'staff/names')).json.people;
+  assert.ok(people.some(p => p.name === 'Asha'));
+  assert.ok(people.every(p => !('email' in p) && !('password' in p)));
+  const hc = await q(tech, 'homeCollection', 'create', { data: { patientName: 'Meena', address: 'Ward 4', scheduledAt: new Date(), assignedTo: techUserId, assignedName: 'Asha', status: 'ASSIGNED' } });
+  assert.equal(hc.createdBy, techUserId);
+  await q(tech, 'homeCollection', 'update', { where: { id: hc.id }, data: { status: 'IN_TRANSIT' } });
+  const lab = await q(tech, 'outsourceLab', 'create', { data: { name: 'Metro Ref Lab' } });
+  const sent = await q(tech, 'outsourcedTest', 'create', { data: { labId: lab.id, patientName: 'Meena', testName: 'Vitamin D', cost: 650 } });
+  await denied(q(tech, 'outsourcedTest', 'delete', { where: { id: sent.id } }));
+  await q(tech, 'corporate', 'create', { data: { name: 'Coal India Hospital', discount: 15, creditDays: 30 } });
+  const trail = (await q(owner, 'activityLog', 'findMany', { where: { userId: techUserId } })).map(l => `${l.action}: ${l.details}`);
+  for (const expected of [/Created expense: ₹500 REAGENT · CBC reagent/, /Stock out: EDTA tubes: −70 pcs → 30/, /Updated home collection: Meena → IN_TRANSIT/, /Created outsourced test: Vitamin D for Meena · ₹650/]) {
+    assert.ok(trail.some(t => expected.test(t)), `missing ${expected} in ${trail.join(' | ')}`);
+  }
+  await q(owner, 'expense', 'delete', { where: { id: exp.id } });
+});
+
+test('sample labels get a real Code 128 barcode image', async () => {
+  const png = await call(tech, 'POST', 'barcode/png', { text: 'LAB-ORD-20261006-0001' });
+  assert.equal(png.type, 'image/png');
+  assert.deepEqual([...png.body.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+  assert.ok(png.body.length > 300);
+  assert.equal((await call(tech, 'POST', 'barcode/png', { text: '' })).status, 400);
+});
+
+test('owner who forgot the password resets it with the one-time recovery code; nobody can plant one', async () => {
+  const anon = { prisma, dataDir: tmp, session: null };
+  const recover = (code, newPassword) => call(anon, 'POST', 'auth/recover', { code, newPassword });
+  assert.equal((await recover('AAAA-BBBB-CCCC-DDDD', 'New@1234')).status, 401);
+  const r = await recover(ownerCode.toLowerCase().replace(/-/g, ' '), 'New@1234');
+  assert.equal(r.json.success, true, JSON.stringify(r.json));
+  assert.equal(r.json.email, 'owner@lab.test', 'a forgotten login email is shown too');
+  assert.notEqual(r.json.recoveryCode, ownerCode);
+  assert.equal((await recover(ownerCode, 'Other@123')).status, 401, 'a used code is dead');
+  await signIn('owner@lab.test', 'New@1234');
+
+  await denied(q(owner, 'user', 'update', { where: { id: owner.session.user.id }, data: { recoveryHash: 'planted' } }));
+  assert.equal((await call(tech, 'POST', 'auth/recovery-code', { password: 'Asha@123' })).status, 403);
+  assert.ok((await q(owner, 'user', 'findMany', {})).every(u => !('recoveryHash' in u) && !('password' in u)));
+
+  assert.equal((await call(owner, 'POST', 'auth/recovery-code', { password: 'wrong' })).status, 401);
+  const fresh = await call(owner, 'POST', 'auth/recovery-code', { password: 'New@1234' });
+  assert.equal((await recover(r.json.recoveryCode, 'Other@123')).status, 401, 'a new code replaces the old one');
+  assert.equal((await recover(fresh.json.recoveryCode, 'Secret@123')).json.success, true);
 });
 
 test('sign-out ends the session; five wrong passwords lock sign-in for a minute', async () => {

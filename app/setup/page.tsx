@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Activity, Shield, Building2, User, Key, CheckCircle2, ChevronRight, ChevronLeft, AlertCircle } from 'lucide-react';
 import { db } from '../../lib/db';
 import { useEnterAsTab } from '../../lib/useEnterAsTab';
+import { RecoveryCode } from '../../components/kit';
 
 export default function SetupPage() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function SetupPage() {
   const [ownerEmail, setOwnerEmail] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
 
   // Checking if setup is already done
   useEffect(() => {
@@ -115,6 +117,7 @@ export default function SetupPage() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) throw new Error(data.error || 'Setup failed. Please try again.');
       localStorage.setItem('pathology_lab_current_user', JSON.stringify(data.user));
+      setRecoveryCode(data.recoveryCode);
       setStep(4);
     } catch (err: any) {
       console.error(err);
@@ -382,12 +385,9 @@ export default function SetupPage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => router.push('/dashboard')}
-                className="w-full max-w-xs py-3 rounded-xl bg-primary hover:bg-primary/90 text-sm font-bold text-white shadow-sm transition-colors"
-              >
-                Launch Dashboard
-              </button>
+              <div className="w-full max-w-sm">
+                <RecoveryCode code={recoveryCode} continueLabel="Launch Dashboard" onContinue={() => router.push('/dashboard')} />
+              </div>
             </motion.div>
           )}
 

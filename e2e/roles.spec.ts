@@ -56,6 +56,7 @@ test.describe.serial('technician-run lab with owner control', () => {
     await page.getByPlaceholder('••••••••').nth(0).fill(OWNER.password);
     await page.getByPlaceholder('••••••••').nth(1).fill(OWNER.password);
     await page.getByRole('button', { name: /Build Lab/ }).click();
+    await page.getByLabel('I have written down this code').check();
     await page.getByRole('button', { name: 'Launch Dashboard' }).click({ timeout: 60_000 });
 
     await go(page, '/staff');
@@ -115,7 +116,7 @@ test.describe.serial('technician-run lab with owner control', () => {
     await expect(page.getByRole('button', { name: /Restore/ })).toHaveCount(0);
     await page.getByRole('button', { name: /Save a copy/ }).click();
     const copy = path.join(dataDir, 'downloads', `JharLab-backup-${new Date().toISOString().slice(0, 10)}.db`);
-    await expect.poll(() => fs.existsSync(copy)).toBe(true);
+    await expect(page.getByText(/Copy saved to/)).toBeVisible(); // the app reports success once the copy is complete
     expect(fs.readFileSync(copy).subarray(0, 15).toString()).toBe('SQLite format 3');
   });
 

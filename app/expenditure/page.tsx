@@ -1,350 +1,204 @@
 "use client";
 import { AppLayout } from '@/components/AppLayout';
-import { motion } from 'framer-motion';
-import { Plus, Download, X, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
-import { formatCurrency } from '@/shared/constants';
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Plus, Edit, Trash2, FileDown, FileText } from 'lucide-react';
+import { db } from '@/lib/db';
+import { can } from '@/lib/roles';
+import { makeTablePdf, downloadPdf, rupees } from '@/lib/pdf-table';
+import { Field, Modal, ToastView, useToast, useRole, useLive, inputCls, btnPrimary, btnGhost, card, th, td, todayInput, dateText } from '@/components/kit';
 
-interface Expense {
-  id: number;
-  category: string;
-  description: string;
-  amount: number;
-  paidTo: string;
-  method: string;
-  date: string;
-}
+// Lab spending, saved on this PC. Feeds the owner's monthly profit / loss on the dashboard.
 
-const categories = ['SALARY', 'REAGENT', 'RENT', 'EQUIPMENT', 'MAINTENANCE', 'UTILITY', 'MISC'];
-const methods = ['CASH', 'UPI', 'NEFT', 'CHEQUE'];
+const CATEGORIES: Record<string, { label: string; color: string }> = {
+  SALARY: { label: 'Salary', color: 'bg-blue-600/10 text-blue-700 dark:text-blue-400' },
+  REAGENT: { label: 'Reagents & kits', color: 'bg-green-600/10 text-green-700 dark:text-green-400' },
+  RENT: { label: 'Rent', color: 'bg-purple-600/10 text-purple-700 dark:text-purple-400' },
+  MAINTENANCE: { label: 'Maintenance', color: 'bg-orange-600/10 text-orange-700 dark:text-orange-400' },
+  UTILITY: { label: 'Electricity / water / internet', color: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
+  EQUIPMENT: { label: 'Equipment', color: 'bg-red-600/10 text-red-700 dark:text-red-400' },
+  MISC: { label: 'Other', color: 'bg-muted text-muted-foreground' },
+};
+const METHODS = ['CASH', 'UPI', 'BANK', 'CARD', 'CHEQUE'];
 
-const initialExpenses: Expense[] = [];
+type Expense = { id: number; date: string; category: string; description: string; amount: number; paidTo: string | null; method: string };
+const empty = { id: 0, date: todayInput(), category: 'REAGENT', description: '', amount: '', paidTo: '', method: 'CASH' };
 
-const catColors: Record<string, string> = {
-  SALARY: 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400',
-  REAGENT: 'bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400',
-  RENT: 'bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-400',
-  MAINTENANCE: 'bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-400',
-  UTILITY: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/50 dark:text-yellow-400',
-  EQUIPMENT: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400',
-  MISC: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
+const monthRange = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  return { gte: new Date(y, m - 1, 1), lt: new Date(y, m, 1) };
 };
 
-const emptyForm = { category: 'SALARY', description: '', amount: '', paidTo: '', method: 'CASH', date: '' };
-
-function formatDisplayDate(d: string) {
-  if (!d) return '';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
-}
-
 export default function ExpenditurePage() {
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState(emptyForm);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const role = useRole();
+  const [month, setMonth] = useState(todayInput().slice(0, 7));
+  const [category, setCategory] = useState('ALL');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [form, setForm] = useState<typeof empty | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Expense | null>(null);
+  const [toast, showToast] = useToast();
 
-  const [sortField, setSortField] = useState<keyof Expense | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const load = (m = month) =>
+    db.query('expense', 'findMany', { where: { date: monthRange(m) }, orderBy: [{ date: 'desc' }, { id: 'desc' }] })
+      .then(setExpenses)
+      .catch(err => showToast(err.message, 'error'));
+  useLive(() => load(), ['expense']);
 
-  const requestSort = (field: keyof Expense) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortField === field && sortDirection === 'asc') {
-      direction = 'desc';
+  const shown = useMemo(() => expenses.filter(e => category === 'ALL' || e.category === category), [expenses, category]);
+  const total = shown.reduce((s, e) => s + e.amount, 0);
+  const byCategory = useMemo(() => {
+    const sums: Record<string, number> = {};
+    for (const e of expenses) sums[e.category] = (sums[e.category] || 0) + e.amount;
+    return Object.entries(sums).sort((a, b) => b[1] - a[1]);
+  }, [expenses]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form) return;
+    const amount = Number(form.amount);
+    if (!form.description.trim() || !(amount > 0)) return showToast('Enter a description and an amount above zero', 'error');
+    const data = { date: new Date(`${form.date}T12:00:00`), category: form.category, description: form.description.trim(), amount, paidTo: form.paidTo.trim() || null, method: form.method };
+    try {
+      if (form.id) await db.query('expense', 'update', { where: { id: form.id }, data });
+      else await db.query('expense', 'create', { data });
+      setForm(null);
+      showToast(`Expense of ${rupees(amount)} saved`);
+      if (!form.date.startsWith(month)) setMonth(form.date.slice(0, 7));
+      load(form.date.slice(0, 7));
+    } catch (err: any) {
+      showToast(err.message, 'error');
     }
-    setSortField(field);
-    setSortDirection(direction);
   };
 
-  const SortHeader = ({ field, label }: { field: keyof Expense; label: string }) => {
-    const isActive = sortField === field;
-    return (
-      <button
-        onClick={() => requestSort(field)}
-        className="flex items-center gap-1 hover:text-foreground font-semibold transition-colors focus:outline-none"
-      >
-        <span>{label}</span>
-        {isActive ? (
-          sortDirection === 'asc' ? <ChevronUp className="h-3.5 w-3.5 text-primary" /> : <ChevronDown className="h-3.5 w-3.5 text-primary" />
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-40 hover:opacity-80" />
-        )}
-      </button>
-    );
+  const remove = async (x: Expense) => {
+    try {
+      await db.query('expense', 'delete', { where: { id: x.id } });
+      setConfirmDelete(null);
+      showToast('Expense deleted');
+      load();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
   };
 
-  useEffect(() => { 
-    if (toast) { 
-      const t = setTimeout(() => setToast(null), 3000); 
-      return () => clearTimeout(t); 
-    } 
-  }, [toast]);
-
-  const total = expenses.reduce((sum, e) => sum + e.amount, 0);
-
-  const sortedExpenses = useMemo(() => {
-    let result = [...expenses];
-    if (sortField) {
-      result.sort((a, b) => {
-        let valA = a[sortField];
-        let valB = b[sortField];
-
-        // Date sorting
-        if (sortField === 'date') {
-          const timeA = new Date(a.date).getTime();
-          const timeB = new Date(b.date).getTime();
-          return sortDirection === 'asc' ? timeA - timeB : timeB - timeA;
-        }
-
-        // String comparison
-        if (typeof valA === 'string' && typeof valB === 'string') {
-          return sortDirection === 'asc'
-            ? valA.localeCompare(valB)
-            : valB.localeCompare(valA);
-        }
-
-        // Numeric comparison
-        if (typeof valA === 'number' && typeof valB === 'number') {
-          return sortDirection === 'asc' ? valA - valB : valB - valA;
-        }
-
-        return 0;
-      });
-    }
-    return result;
-  }, [expenses, sortField, sortDirection]);
-
-  const handleAdd = () => {
-    if (!form.description.trim() || !form.amount) { 
-      setToast({ message: 'Description and amount are required', type: 'error' }); 
-      return; 
-    }
-    const newExp: Expense = {
-      id: Date.now(),
-      category: form.category,
-      description: form.description,
-      amount: Number(form.amount),
-      paidTo: form.paidTo,
-      method: form.method,
-      date: form.date,
-    };
-    setExpenses(prev => [...prev, newExp]);
-    setForm(emptyForm);
-    setShowModal(false);
-    setToast({ message: 'Expense added successfully', type: 'success' });
-  };
-
-  const handleExport = () => {
-    const headers = ['Date,Category,Description,Paid To,Method,Amount'];
-    const rows = expenses.map(e => `${formatDisplayDate(e.date)},${e.category},"${e.description}","${e.paidTo}",${e.method},${e.amount}`);
-    const csv = [...headers, ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
+  const rows = shown.map(e => [dateText(e.date), CATEGORIES[e.category]?.label || e.category, e.description, e.paidTo || '', e.method, rupees(e.amount)]);
+  const exportCsv = () => {
+    const csv = [['Date', 'Category', 'Description', 'Paid to', 'Method', 'Amount'], ...shown.map(e => [new Date(e.date).toISOString().slice(0, 10), e.category, e.description, e.paidTo || '', e.method, e.amount])]
+      .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `expenses_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `expenses-${month}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
-    setToast({ message: 'CSV exported successfully', type: 'success' });
   };
-
-  const inputClass = "w-full mt-1 rounded-xl border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all";
+  const exportPdf = async () => {
+    const label = new Date(`${month}-01T12:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    const bytes = await makeTablePdf({
+      title: `Expense statement — ${label}`,
+      subtitle: `${shown.length} ${shown.length === 1 ? 'entry' : 'entries'}${category !== 'ALL' ? ` · ${CATEGORIES[category].label}` : ''}`,
+      columns: [{ header: 'Date', width: 12 }, { header: 'Category', width: 16 }, { header: 'Description', width: 34 }, { header: 'Paid to', width: 18 }, { header: 'Method', width: 9 }, { header: 'Amount', width: 13, align: 'right' }],
+      rows,
+      totals: ['', '', '', '', 'Total', rupees(total)],
+    });
+    downloadPdf(bytes, `expenses-${month}.pdf`);
+  };
 
   return (
     <AppLayout title="Expenditure" breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Expenditure' }]}>
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 mr-4">
-            <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-all">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Total Expenses (May)</p>
-              <p className="text-3xl font-bold text-red-600 dark:text-red-400">{formatCurrency(total)}</p>
-            </div>
-            <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-all">
-              <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Profit (Revenue - Expenses)</p>
-              <p className="text-3xl font-bold text-green-600 dark:text-green-400">{formatCurrency(1842000 - total)}</p>
-            </div>
-          </div>
-          <div className="flex gap-2.5 self-end sm:self-auto">
-            <button 
-              className="flex items-center gap-2 rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-bold hover:bg-accent text-foreground transition-all shadow-sm" 
-              onClick={handleExport}
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </button>
-            <motion.button 
-              whileHover={{ scale: 1.02 }} 
-              className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground btn-primary-glow hover:shadow-md transition-all shadow-sm animate-glow-pulse" 
-              onClick={() => { setForm(emptyForm); setShowModal(true); }}
-            >
-              <Plus className="h-4 w-4" />
-              Add Expense
-            </motion.button>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Month"><input type="month" value={month} onChange={e => { setMonth(e.target.value); load(e.target.value); }} className={`${inputCls} w-44`} /></Field>
+          <Field label="Category">
+            <select value={category} onChange={e => setCategory(e.target.value)} className={`${inputCls} w-56`}>
+              <option value="ALL">All categories</option>
+              {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+          <div className="ml-auto flex gap-2">
+            <button onClick={exportCsv} className={btnGhost}><FileDown className="h-4 w-4" /> CSV</button>
+            <button onClick={exportPdf} className={btnGhost}><FileText className="h-4 w-4" /> PDF statement</button>
+            <button onClick={() => setForm({ ...empty, date: todayInput() })} className={btnPrimary}><Plus className="h-4 w-4" /> Add expense</button>
           </div>
         </div>
 
-        <div className="rounded-xl border bg-card shadow-sm hover:shadow-md transition-shadow overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50 text-left text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                <th className="px-5 py-3.5"><SortHeader field="date" label="Date" /></th>
-                <th className="px-5 py-3.5"><SortHeader field="category" label="Category" /></th>
-                <th className="px-5 py-3.5"><SortHeader field="description" label="Description" /></th>
-                <th className="px-5 py-3.5"><SortHeader field="paidTo" label="Paid To" /></th>
-                <th className="px-5 py-3.5"><SortHeader field="method" label="Method" /></th>
-                <th className="px-5 py-3.5"><SortHeader field="amount" label="Amount" /></th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedExpenses.map((e, i) => (
-                <motion.tr 
-                  key={e.id} 
-                  initial={{ opacity: 0 }} 
-                  animate={{ opacity: 1 }} 
-                  transition={{ delay: i * 0.03 }} 
-                  className="border-b hover:bg-accent/50 transition-colors"
-                >
-                  <td className="px-5 py-3.5 text-xs text-muted-foreground">{formatDisplayDate(e.date)}</td>
-                  <td className="px-5 py-3.5">
-                    <span className={`badge ${catColors[e.category] || ''}`}>
-                      {e.category}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 font-medium text-foreground">{e.description}</td>
-                  <td className="px-5 py-3.5 text-xs text-muted-foreground">{e.paidTo}</td>
-                  <td className="px-5 py-3.5">
-                    <span className="text-xs font-medium bg-muted rounded-full px-2.5 py-1 text-muted-foreground dark:text-foreground">
-                      {e.method}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 font-bold text-red-600 dark:text-red-400">{formatCurrency(e.amount)}</td>
-                  <td className="px-5 py-3.5 text-right">
-                    <button 
-                      onClick={() => {
-                        setExpenses(prev => prev.filter(item => item.id !== e.id));
-                        setToast({ message: 'Expense deleted successfully', type: 'success' });
-                      }}
-                      className="btn-action text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 animate-fade-in-up"
-                      title="Delete Expense"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </motion.tr>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div className={`${card} p-5`}>
+            <div className="text-xs font-medium text-muted-foreground">Spent this month{category !== 'ALL' ? ` (${CATEGORIES[category].label})` : ''}</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums" data-testid="expense-total">{rupees(total)}</div>
+            <div className="text-xs text-muted-foreground">{shown.length} {shown.length === 1 ? 'entry' : 'entries'}</div>
+          </div>
+          <div className={`${card} p-5 md:col-span-3`}>
+            <div className="mb-2 text-xs font-medium text-muted-foreground">By category</div>
+            <div className="flex flex-wrap gap-2">
+              {byCategory.length === 0 && <span className="text-sm text-muted-foreground">Nothing spent yet this month.</span>}
+              {byCategory.map(([k, v]) => (
+                <button key={k} onClick={() => setCategory(category === k ? 'ALL' : k)} className={`rounded-full px-3 py-1 text-xs font-semibold ${CATEGORIES[k]?.color || ''} ${category === k ? 'ring-2 ring-primary' : ''}`}>
+                  {CATEGORIES[k]?.label || k}: {rupees(v)}
+                </button>
               ))}
-              {sortedExpenses.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No expenses recorded. Click "Add Expense" to get started.
+            </div>
+          </div>
+        </div>
+
+        <div className={`${card} overflow-hidden`}>
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/40"><tr><th className={th}>Date</th><th className={th}>Category</th><th className={th}>Description</th><th className={th}>Paid to</th><th className={th}>Method</th><th className={`${th} text-right`}>Amount</th><th className={`${th} text-right`}>Actions</th></tr></thead>
+            <tbody className="divide-y">
+              {shown.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">No expenses for this month. Add salary, reagents, rent and bills here to see profit / loss on the dashboard.</td></tr>}
+              {shown.map(e => (
+                <tr key={e.id} data-testid="expense-row">
+                  <td className={td}>{dateText(e.date)}</td>
+                  <td className={td}><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${CATEGORIES[e.category]?.color || ''}`}>{CATEGORIES[e.category]?.label || e.category}</span></td>
+                  <td className={`${td} font-medium`}>{e.description}</td>
+                  <td className={`${td} text-muted-foreground`}>{e.paidTo || '—'}</td>
+                  <td className={`${td} text-muted-foreground`}>{e.method}</td>
+                  <td className={`${td} text-right font-semibold tabular-nums`}>{rupees(e.amount)}</td>
+                  <td className={td}>
+                    <div className="flex justify-end gap-1.5">
+                      <button className="btn-action" aria-label={`Edit ${e.description}`} onClick={() => setForm({ id: e.id, date: new Date(e.date).toISOString().slice(0, 10), category: e.category, description: e.description, amount: String(e.amount), paidTo: e.paidTo || '', method: e.method })}><Edit className="h-4 w-4" /></button>
+                      {can(role, 'bill:delete') && <button className="btn-action text-destructive" aria-label={`Delete ${e.description}`} onClick={() => setConfirmDelete(e)}><Trash2 className="h-4 w-4" /></button>}
+                    </div>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in-up" onClick={() => setShowModal(false)}>
-          <div className="bg-card border rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-bold text-foreground">Add Expense</h3>
-              <button 
-                type="button" 
-                onClick={() => setShowModal(false)} 
-                className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-accent transition-colors"
-                aria-label="Close modal"
-              >
-                <X className="h-5 w-5" />
-              </button>
+      {form && (
+        <Modal title={form.id ? 'Edit expense' : 'Add expense'} onClose={() => setForm(null)}>
+          <form onSubmit={save} className="grid grid-cols-2 gap-4">
+            <Field label="Date *"><input type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className={inputCls} /></Field>
+            <Field label="Category *">
+              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className={inputCls}>
+                {Object.entries(CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Description *" className="col-span-2"><input type="text" required value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className={inputCls} placeholder="e.g. CBC reagent pack" /></Field>
+            <Field label="Amount (₹) *"><input type="number" min="0" step="any" required value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} className={inputCls} /></Field>
+            <Field label="Paid by">
+              <select value={form.method} onChange={e => setForm({ ...form, method: e.target.value })} className={inputCls}>
+                {METHODS.map(m => <option key={m}>{m}</option>)}
+              </select>
+            </Field>
+            <Field label="Paid to" className="col-span-2"><input type="text" value={form.paidTo} onChange={e => setForm({ ...form, paidTo: e.target.value })} className={inputCls} placeholder="Supplier / person" /></Field>
+            <div className="col-span-2 mt-2 flex justify-end gap-2">
+              <button type="button" onClick={() => setForm(null)} className={btnGhost}>Cancel</button>
+              <button type="submit" className={btnPrimary}>Save expense</button>
             </div>
-            <div className="space-y-4">
-              <div>
-                <label className="form-label">Category *</label>
-                <select 
-                  className={inputClass} 
-                  value={form.category} 
-                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                >
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="form-label">Description *</label>
-                <input 
-                  className={inputClass} 
-                  value={form.description} 
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))} 
-                  placeholder="e.g. Office supplies"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="form-label">Amount *</label>
-                  <input 
-                    type="number" 
-                    className={inputClass} 
-                    value={form.amount} 
-                    onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} 
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="form-label">Paid To</label>
-                  <input 
-                    className={inputClass} 
-                    value={form.paidTo} 
-                    onChange={e => setForm(f => ({ ...f, paidTo: e.target.value }))} 
-                    placeholder="Recipient name"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="form-label">Payment Method</label>
-                  <select 
-                    className={inputClass} 
-                    value={form.method} 
-                    onChange={e => setForm(f => ({ ...f, method: e.target.value }))}
-                  >
-                    {methods.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Date</label>
-                  <input 
-                    type="date" 
-                    className={inputClass} 
-                    value={form.date} 
-                    onChange={e => setForm(f => ({ ...f, date: e.target.value }))} 
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-border">
-              <button 
-                className="py-2.5 px-5 text-sm font-bold rounded-xl border border-border bg-card hover:bg-accent text-foreground transition-all shadow-sm" 
-                onClick={() => setShowModal(false)}
-              >
-                Cancel
-              </button>
-              <button 
-                className="py-2.5 px-5 text-sm font-bold rounded-xl bg-primary text-primary-foreground btn-primary-glow hover:shadow-md transition-all shadow-sm" 
-                onClick={handleAdd}
-              >
-                Add Expense
-              </button>
-            </div>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
 
-      {toast && (
-        <div className={`toast-global ${toast.type === 'success' ? 'toast-success' : 'toast-error'}`}>
-          {toast.message}
-        </div>
+      {confirmDelete && (
+        <Modal title="Delete this expense?" onClose={() => setConfirmDelete(null)} footer={<>
+          <button onClick={() => setConfirmDelete(null)} className={btnGhost}>Cancel</button>
+          <button onClick={() => remove(confirmDelete)} className="h-10 rounded-lg bg-destructive px-4 text-sm font-semibold text-white">Delete</button>
+        </>}>
+          <p className="text-sm text-muted-foreground">{confirmDelete.description} · {rupees(confirmDelete.amount)} on {dateText(confirmDelete.date)}. The deletion is kept in the audit log.</p>
+        </Modal>
       )}
+      <ToastView toast={toast} />
     </AppLayout>
   );
 }

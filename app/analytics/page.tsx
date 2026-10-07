@@ -374,18 +374,10 @@ export default function AnalyticsPage() {
         : 0;
 
       // Inventory warning
-      let lowStockCount = 0;
-      let lowStockItems: any[] = [];
-      if (typeof window !== 'undefined') {
-        const storedInventory = localStorage.getItem('pathology_lab_inventory');
-        if (storedInventory) {
-          try {
-            const inv = JSON.parse(storedInventory);
-            lowStockItems = inv.filter((item: any) => item.status === 'low' || item.status === 'critical');
-            lowStockCount = lowStockItems.length;
-          } catch (e) {}
-        }
-      }
+      const stockItems = await db.query('inventoryItem', 'findMany', { where: { isActive: true } }).catch(() => []);
+      const lowStockItems: any[] = (stockItems || []).filter((i: any) => i.currentStock <= i.minStock)
+        .map((i: any) => ({ ...i, stock: i.currentStock, min: i.minStock, status: i.currentStock <= i.minStock * 0.5 ? 'critical' : 'low' }));
+      const lowStockCount = lowStockItems.length;
 
       // ──────────────────────────────────────────
       // 5. DOCTORS CALCULATIONS

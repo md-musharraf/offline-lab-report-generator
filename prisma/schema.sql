@@ -35,6 +35,7 @@ CREATE TABLE "User" (
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "password" TEXT NOT NULL,
+    "recoveryHash" TEXT,
     "role" TEXT NOT NULL DEFAULT 'RECEPTIONIST',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "lastLogin" DATETIME,
@@ -293,6 +294,7 @@ CREATE TABLE "InventoryItem" (
     "maxStock" REAL,
     "expiryDate" DATETIME,
     "supplierId" INTEGER,
+    "supplierName" TEXT,
     "batchNumber" TEXT,
     "purchasePrice" REAL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -366,6 +368,81 @@ CREATE TABLE "QcResult" (
 CREATE TABLE "Counter" (
     "key" TEXT NOT NULL PRIMARY KEY,
     "value" INTEGER NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "Expense" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "date" DATETIME NOT NULL,
+    "category" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "amount" REAL NOT NULL,
+    "paidTo" TEXT,
+    "method" TEXT NOT NULL DEFAULT 'CASH',
+    "createdBy" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "HomeCollection" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "patientName" TEXT NOT NULL,
+    "phone" TEXT,
+    "address" TEXT NOT NULL,
+    "tests" TEXT,
+    "scheduledAt" DATETIME NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "assignedTo" INTEGER,
+    "assignedName" TEXT,
+    "notes" TEXT,
+    "createdBy" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "OutsourceLab" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "name" TEXT NOT NULL,
+    "mobile" TEXT,
+    "email" TEXT,
+    "address" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "OutsourcedTest" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "labId" INTEGER NOT NULL,
+    "patientName" TEXT NOT NULL,
+    "orderNo" TEXT,
+    "testName" TEXT NOT NULL,
+    "cost" REAL NOT NULL DEFAULT 0,
+    "sentAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "resultReceivedAt" DATETIME,
+    "notes" TEXT,
+    "createdBy" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "OutsourcedTest_labId_fkey" FOREIGN KEY ("labId") REFERENCES "OutsourceLab" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "Corporate" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "name" TEXT NOT NULL,
+    "contact" TEXT,
+    "mobile" TEXT,
+    "email" TEXT,
+    "creditDays" INTEGER NOT NULL DEFAULT 0,
+    "discount" REAL NOT NULL DEFAULT 0,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateIndex
@@ -445,4 +522,19 @@ CREATE INDEX "ActivityLog_createdAt_idx" ON "ActivityLog"("createdAt");
 
 -- CreateIndex
 CREATE INDEX "ActivityLog_userId_idx" ON "ActivityLog"("userId");
+
+-- CreateIndex
+CREATE INDEX "Expense_date_idx" ON "Expense"("date");
+
+-- CreateIndex
+CREATE INDEX "HomeCollection_scheduledAt_idx" ON "HomeCollection"("scheduledAt");
+
+-- CreateIndex
+CREATE INDEX "HomeCollection_status_idx" ON "HomeCollection"("status");
+
+-- CreateIndex
+CREATE INDEX "OutsourcedTest_labId_idx" ON "OutsourcedTest"("labId");
+
+-- CreateIndex
+CREATE INDEX "OutsourcedTest_sentAt_idx" ON "OutsourcedTest"("sentAt");
 

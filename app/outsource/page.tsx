@@ -1,762 +1,253 @@
 "use client";
 import { AppLayout } from '@/components/AppLayout';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, 
-  Building2, 
-  Edit, 
-  Phone, 
-  Mail, 
-  Trash2, 
-  Search, 
-  CheckCircle, 
-  Clock, 
-  FlaskConical, 
-  DollarSign, 
-  X 
-} from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
+import { Plus, Edit, CheckCircle2, XCircle, Trash2, FileText, Building2, Send } from 'lucide-react';
+import { db } from '@/lib/db';
+import { can } from '@/lib/roles';
+import { makeTablePdf, downloadPdf, rupees } from '@/lib/pdf-table';
+import { Field, Modal, ToastView, useToast, useRole, useLive, inputCls, btnPrimary, btnGhost, card, th, td, todayInput, dateText } from '@/components/kit';
 
-interface Lab {
-  id: number;
-  name: string;
-  mobile: string;
-  email: string;
-  address: string;
-  pendingTests: number;
-  isActive: boolean;
-}
+// Tests sent to partner labs: what, for whom, what it cost and whether the result came back. Saved on this PC.
 
-interface OutsourcedTest {
-  id: number;
-  patientName: string;
-  testName: string;
-  partnerLab: string;
-  outsourceDate: string;
-  status: 'Pending' | 'Completed' | 'Cancelled';
-  cost: number;
-}
+type Lab = { id: number; name: string; mobile: string | null; email: string | null; address: string | null; isActive: boolean };
+type Sent = { id: number; labId: number; lab?: Lab; patientName: string; orderNo: string | null; testName: string; cost: number; sentAt: string; status: string; resultReceivedAt: string | null; notes: string | null };
 
-const initialLabs: Lab[] = [
-  {
-    id: 1,
-    name: "Apex Diagnostics",
-    mobile: "+1 555-0199",
-    email: "partner@apexdiag.com",
-    address: "102 Health Ave, Sector 4",
-    pendingTests: 2,
-    isActive: true,
-  },
-  {
-    id: 2,
-    name: "Metro Genomics Lab",
-    mobile: "+1 555-0143",
-    email: "info@metrogenomics.net",
-    address: "405 Biotech Park, Phase II",
-    pendingTests: 0,
-    isActive: true,
-  },
-  {
-    id: 3,
-    name: "CarePath Labs",
-    mobile: "+1 555-0188",
-    email: "support@carepath.org",
-    address: "78 Wellness St, Block B",
-    pendingTests: 1,
-    isActive: true,
-  }
-];
-
-const initialTests: OutsourcedTest[] = [
-  {
-    id: 1,
-    patientName: "John Doe",
-    testName: "HLA-B27 Genotyping",
-    partnerLab: "Metro Genomics Lab",
-    outsourceDate: "2026-06-02",
-    status: "Completed",
-    cost: 120,
-  },
-  {
-    id: 2,
-    patientName: "Sarah Jenkins",
-    testName: "Karyotyping Analysis",
-    partnerLab: "Apex Diagnostics",
-    outsourceDate: "2026-06-03",
-    status: "Pending",
-    cost: 180,
-  },
-  {
-    id: 3,
-    patientName: "Michael Chang",
-    testName: "Amniotic Fluid PCR",
-    partnerLab: "Apex Diagnostics",
-    outsourceDate: "2026-06-04",
-    status: "Pending",
-    cost: 250,
-  },
-  {
-    id: 4,
-    patientName: "Emily Watson",
-    testName: "BRCA1 Gene Sequencing",
-    partnerLab: "CarePath Labs",
-    outsourceDate: "2026-06-04",
-    status: "Pending",
-    cost: 320,
-  }
-];
-
-const emptyForm = { name: '', mobile: '', email: '', address: '' };
+const STATUS: Record<string, { label: string; cls: string }> = {
+  PENDING: { label: 'Awaiting result', cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-400' },
+  COMPLETED: { label: 'Result received', cls: 'bg-green-600/10 text-green-700 dark:text-green-400' },
+  CANCELLED: { label: 'Cancelled', cls: 'bg-muted text-muted-foreground' },
+};
+const monthRange = (month: string) => {
+  const [y, m] = month.split('-').map(Number);
+  return { gte: new Date(y, m - 1, 1), lt: new Date(y, m, 1) };
+};
+const emptyLab = { id: 0, name: '', mobile: '', email: '', address: '' };
+const emptySent = { id: 0, labId: '', patientName: '', orderNo: '', testName: '', cost: '', sentAt: todayInput(), notes: '' };
 
 export default function OutsourcePage() {
-  const [labs, setLabs] = useState<Lab[]>(initialLabs);
-  const [outsourcedTests, setOutsourcedTests] = useState<OutsourcedTest[]>(initialTests);
-  const [activeTab, setActiveTab] = useState<'labs' | 'tests'>('labs');
+  const role = useRole();
+  const [tab, setTab] = useState<'sent' | 'labs'>('sent');
+  const [month, setMonth] = useState(todayInput().slice(0, 7));
+  const [labs, setLabs] = useState<Lab[]>([]);
+  const [sent, setSent] = useState<Sent[]>([]);
+  const [labForm, setLabForm] = useState<typeof emptyLab | null>(null);
+  const [sentForm, setSentForm] = useState<typeof emptySent | null>(null);
+  const [toast, showToast] = useToast();
 
-  // Search queries
-  const [labSearchQuery, setLabSearchQuery] = useState('');
-  const [testSearchQuery, setTestSearchQuery] = useState('');
+  const load = (m = month) =>
+    Promise.all([
+      db.query('outsourceLab', 'findMany', { orderBy: { name: 'asc' } }),
+      db.query('outsourcedTest', 'findMany', { where: { sentAt: monthRange(m) }, include: { lab: true }, orderBy: { sentAt: 'desc' } }),
+    ]).then(([l, s]) => {
+      setLabs(l);
+      setSent(s);
+    }).catch(err => showToast(err.message, 'error'));
+  useLive(() => load(), ['outsourceLab', 'outsourcedTest']);
 
-  // Modals state
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editTarget, setEditTarget] = useState<Lab | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const activeLabs = labs.filter(l => l.isActive);
+  const totals = useMemo(() => ({
+    cost: sent.filter(s => s.status !== 'CANCELLED').reduce((a, s) => a + s.cost, 0),
+    pending: sent.filter(s => s.status === 'PENDING').length,
+  }), [sent]);
 
-  const [showAddTestModal, setShowAddTestModal] = useState(false);
-  const [showEditTestModal, setShowEditTestModal] = useState(false);
-  const [editTestTarget, setEditTestTarget] = useState<OutsourcedTest | null>(null);
-  const [testForm, setTestForm] = useState({
-    patientName: '',
-    testName: '',
-    partnerLab: '',
-    outsourceDate: new Date().toISOString().split('T')[0],
-    status: 'Pending' as 'Pending' | 'Completed' | 'Cancelled',
-    cost: 0
-  });
-
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-
-  useEffect(() => { 
-    if (toast) { 
-      const t = setTimeout(() => setToast(null), 3000); 
-      return () => clearTimeout(t); 
-    } 
-  }, [toast]);
-
-  // Labs handlers
-  const handleAdd = () => {
-    if (!form.name.trim()) { setToast({ message: 'Lab name is required', type: 'error' }); return; }
-    const newLab: Lab = {
-      id: Date.now(),
-      name: form.name,
-      mobile: form.mobile,
-      email: form.email,
-      address: form.address,
-      pendingTests: 0,
-      isActive: true,
-    };
-    setLabs(prev => [...prev, newLab]);
-    setForm(emptyForm);
-    setShowAddModal(false);
-    setToast({ message: `${newLab.name} added successfully`, type: 'success' });
-  };
-
-  const handleEdit = () => {
-    if (!editTarget) return;
-    if (!form.name.trim()) { setToast({ message: 'Lab name is required', type: 'error' }); return; }
-    setLabs(prev => prev.map(l => l.id === editTarget.id ? { ...l, name: form.name, mobile: form.mobile, email: form.email, address: form.address } : l));
-    setShowEditModal(false);
-    setEditTarget(null);
-    setForm(emptyForm);
-    setToast({ message: 'Lab updated successfully', type: 'success' });
-  };
-
-  const openEdit = (lab: Lab) => {
-    setEditTarget(lab);
-    setForm({ name: lab.name, mobile: lab.mobile, email: lab.email, address: lab.address });
-    setShowEditModal(true);
-  };
-
-  const handleDeleteLab = (id: number) => {
-    const labToDelete = labs.find(l => l.id === id);
-    if (!labToDelete) return;
-    setLabs(prev => prev.filter(l => l.id !== id));
-    setToast({ message: `${labToDelete.name} removed successfully`, type: 'success' });
-  };
-
-  // Test handlers
-  const handleAddTest = () => {
-    if (!testForm.patientName.trim()) { setToast({ message: 'Patient name is required', type: 'error' }); return; }
-    if (!testForm.testName.trim()) { setToast({ message: 'Test name is required', type: 'error' }); return; }
-    if (!testForm.partnerLab) { setToast({ message: 'Please select a reference lab', type: 'error' }); return; }
-    if (testForm.cost <= 0) { setToast({ message: 'Please enter a valid cost', type: 'error' }); return; }
-
-    const newTest: OutsourcedTest = {
-      id: Date.now(),
-      patientName: testForm.patientName,
-      testName: testForm.testName,
-      partnerLab: testForm.partnerLab,
-      outsourceDate: testForm.outsourceDate,
-      status: testForm.status,
-      cost: Number(testForm.cost)
-    };
-
-    setOutsourcedTests(prev => [...prev, newTest]);
-    
-    // Update lab pending count if status is pending
-    if (newTest.status === 'Pending') {
-      setLabs(prev => prev.map(l => l.name === newTest.partnerLab ? { ...l, pendingTests: l.pendingTests + 1 } : l));
+  const saveLab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!labForm?.name.trim()) return showToast('Lab name is required', 'error');
+    const data = { name: labForm.name.trim(), mobile: labForm.mobile.trim() || null, email: labForm.email.trim() || null, address: labForm.address.trim() || null };
+    try {
+      if (labForm.id) await db.query('outsourceLab', 'update', { where: { id: labForm.id }, data });
+      else await db.query('outsourceLab', 'create', { data });
+      setLabForm(null);
+      showToast(`${data.name} saved`);
+      load();
+    } catch (err: any) {
+      showToast(err.message, 'error');
     }
-
-    setTestForm({
-      patientName: '',
-      testName: '',
-      partnerLab: '',
-      outsourceDate: new Date().toISOString().split('T')[0],
-      status: 'Pending',
-      cost: 0
-    });
-    setShowAddTestModal(false);
-    setToast({ message: `Outsourced test for ${newTest.patientName} created`, type: 'success' });
   };
 
-  const handleEditTest = () => {
-    if (!editTestTarget) return;
-    if (!testForm.patientName.trim()) { setToast({ message: 'Patient name is required', type: 'error' }); return; }
-    if (!testForm.testName.trim()) { setToast({ message: 'Test name is required', type: 'error' }); return; }
-    if (!testForm.partnerLab) { setToast({ message: 'Please select a reference lab', type: 'error' }); return; }
-    if (testForm.cost <= 0) { setToast({ message: 'Please enter a valid cost', type: 'error' }); return; }
-
-    const oldStatus = editTestTarget.status;
-    const newStatus = testForm.status;
-    const oldLabName = editTestTarget.partnerLab;
-    const newLabName = testForm.partnerLab;
-
-    // Adjust lab pending tests count
-    setLabs(prev => prev.map(l => {
-      let pendingTests = l.pendingTests;
-      if (l.name === oldLabName && oldStatus === 'Pending') {
-        pendingTests = Math.max(0, pendingTests - 1);
-      }
-      if (l.name === newLabName && newStatus === 'Pending') {
-        pendingTests += 1;
-      }
-      return { ...l, pendingTests };
-    }));
-
-    setOutsourcedTests(prev => prev.map(t => t.id === editTestTarget.id ? {
-      ...t,
-      patientName: testForm.patientName,
-      testName: testForm.testName,
-      partnerLab: testForm.partnerLab,
-      outsourceDate: testForm.outsourceDate,
-      status: testForm.status,
-      cost: Number(testForm.cost)
-    } : t));
-
-    setShowEditTestModal(false);
-    setEditTestTarget(null);
-    setTestForm({
-      patientName: '',
-      testName: '',
-      partnerLab: '',
-      outsourceDate: new Date().toISOString().split('T')[0],
-      status: 'Pending',
-      cost: 0
-    });
-    setToast({ message: 'Outsourced test updated successfully', type: 'success' });
-  };
-
-  const openEditTest = (test: OutsourcedTest) => {
-    setEditTestTarget(test);
-    setTestForm({
-      patientName: test.patientName,
-      testName: test.testName,
-      partnerLab: test.partnerLab,
-      outsourceDate: test.outsourceDate,
-      status: test.status,
-      cost: test.cost
-    });
-    setShowEditTestModal(true);
-  };
-
-  const handleDeleteTest = (id: number) => {
-    const testToDelete = outsourcedTests.find(t => t.id === id);
-    if (!testToDelete) return;
-
-    if (testToDelete.status === 'Pending') {
-      setLabs(prev => prev.map(l => l.name === testToDelete.partnerLab ? { ...l, pendingTests: Math.max(0, l.pendingTests - 1) } : l));
+  const saveSent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sentForm) return;
+    if (!sentForm.labId || !sentForm.patientName.trim() || !sentForm.testName.trim()) return showToast('Choose a lab and enter the patient and test', 'error');
+    const data = {
+      labId: Number(sentForm.labId), patientName: sentForm.patientName.trim(), orderNo: sentForm.orderNo.trim() || null, testName: sentForm.testName.trim(),
+      cost: Number(sentForm.cost || 0), sentAt: new Date(`${sentForm.sentAt}T12:00:00`), notes: sentForm.notes.trim() || null,
+    };
+    try {
+      if (sentForm.id) await db.query('outsourcedTest', 'update', { where: { id: sentForm.id }, data });
+      else await db.query('outsourcedTest', 'create', { data });
+      setSentForm(null);
+      showToast(`${data.testName} for ${data.patientName} saved`);
+      if (!sentForm.sentAt.startsWith(month)) setMonth(sentForm.sentAt.slice(0, 7));
+      load(sentForm.sentAt.slice(0, 7));
+    } catch (err: any) {
+      showToast(err.message, 'error');
     }
-
-    setOutsourcedTests(prev => prev.filter(t => t.id !== id));
-    setToast({ message: 'Outsourced test removed', type: 'success' });
   };
 
-  // Filter calculations
-  const filteredLabs = labs.filter(l =>
-    l.name.toLowerCase().includes(labSearchQuery.toLowerCase()) ||
-    l.address.toLowerCase().includes(labSearchQuery.toLowerCase()) ||
-    l.email.toLowerCase().includes(labSearchQuery.toLowerCase())
-  );
+  const setStatus = async (s: Sent, status: string) => {
+    try {
+      await db.query('outsourcedTest', 'update', { where: { id: s.id }, data: { status, resultReceivedAt: status === 'COMPLETED' ? new Date() : null } });
+      showToast(`${s.testName}: ${STATUS[status].label}`);
+      load();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
 
-  const filteredTests = outsourcedTests.filter(t =>
-    t.patientName.toLowerCase().includes(testSearchQuery.toLowerCase()) ||
-    t.testName.toLowerCase().includes(testSearchQuery.toLowerCase()) ||
-    t.partnerLab.toLowerCase().includes(testSearchQuery.toLowerCase())
-  );
+  const removeSent = async (s: Sent) => {
+    try {
+      await db.query('outsourcedTest', 'delete', { where: { id: s.id } });
+      showToast('Entry deleted');
+      load();
+    } catch (err: any) {
+      showToast(err.message, 'error');
+    }
+  };
 
-  // Stats calculation
-  const totalLabs = labs.length;
-  const pendingOutsourced = outsourcedTests.filter(t => t.status === 'Pending').length;
-  const completedOutsourced = outsourcedTests.filter(t => t.status === 'Completed').length;
-  const totalCost = outsourcedTests.reduce((acc, t) => acc + (t.status !== 'Cancelled' ? t.cost : 0), 0);
+  const toggleLab = async (l: Lab) => {
+    await db.query('outsourceLab', 'update', { where: { id: l.id }, data: { isActive: !l.isActive } }).catch(err => showToast(err.message, 'error'));
+    load();
+  };
 
-  // Modals renderers
-  const renderLabModal = (onSubmit: () => void, title: string, onClose: () => void) => (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={onClose}>
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-card border rounded-xl p-6 w-full max-w-md shadow-2xl relative" 
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold text-foreground">{title}</h3>
-          <button 
-            type="button" 
-            className="btn-action border-none hover:bg-accent text-muted-foreground rounded-lg"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Lab Name *</label>
-            <input 
-              type="text" 
-              placeholder="e.g. Apex Diagnostics"
-              className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-              value={form.name} 
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} 
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Mobile</label>
-              <input 
-                type="tel" 
-                placeholder="e.g. +1 555-0199"
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-                value={form.mobile} 
-                onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} 
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Email</label>
-              <input 
-                type="email" 
-                placeholder="e.g. info@apex.com"
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-                value={form.email} 
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))} 
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Address</label>
-            <input 
-              type="text" 
-              placeholder="e.g. 102 Health Ave"
-              className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-              value={form.address} 
-              onChange={e => setForm(f => ({ ...f, address: e.target.value }))} 
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-6">
-          <button 
-            type="button" 
-            className="rounded-xl border px-5 py-2.5 text-sm font-bold hover:bg-accent transition-colors" 
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button 
-            type="button" 
-            className="rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground btn-primary-glow" 
-            onClick={onSubmit}
-          >
-            {title.includes('Add') ? 'Add Partner' : 'Save Changes'}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
-
-  const renderTestModal = (onSubmit: () => void, title: string, onClose: () => void) => (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[150] p-4" onClick={onClose}>
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-card border rounded-xl p-6 w-full max-w-md shadow-2xl relative" 
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-bold text-foreground">{title}</h3>
-          <button 
-            type="button" 
-            className="btn-action border-none hover:bg-accent text-muted-foreground rounded-lg"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Patient Name *</label>
-            <input 
-              type="text" 
-              placeholder="e.g. John Doe"
-              className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-              value={testForm.patientName} 
-              onChange={e => setTestForm(f => ({ ...f, patientName: e.target.value }))} 
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Test Name *</label>
-            <input 
-              type="text" 
-              placeholder="e.g. HLA-B27 Genotyping"
-              className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-              value={testForm.testName} 
-              onChange={e => setTestForm(f => ({ ...f, testName: e.target.value }))} 
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Reference Lab *</label>
-              <select 
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm"
-                value={testForm.partnerLab} 
-                onChange={e => setTestForm(f => ({ ...f, partnerLab: e.target.value }))}
-              >
-                <option value="">Select Lab...</option>
-                {labs.map(l => (
-                  <option key={l.id} value={l.name}>{l.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Cost ($) *</label>
-              <input 
-                type="number" 
-                placeholder="e.g. 150"
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-                value={testForm.cost || ''} 
-                onChange={e => setTestForm(f => ({ ...f, cost: Number(e.target.value) }))} 
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Outsource Date</label>
-              <input 
-                type="date" 
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm" 
-                value={testForm.outsourceDate} 
-                onChange={e => setTestForm(f => ({ ...f, outsourceDate: e.target.value }))} 
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Status</label>
-              <select 
-                className="w-full rounded-xl border bg-background px-4 py-2.5 text-sm"
-                value={testForm.status} 
-                onChange={e => setTestForm(f => ({ ...f, status: e.target.value as any }))}
-              >
-                <option value="Pending">Pending</option>
-                <option value="Completed">Completed</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-6">
-          <button 
-            type="button" 
-            className="rounded-xl border px-5 py-2.5 text-sm font-bold hover:bg-accent transition-colors" 
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button 
-            type="button" 
-            className="rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground btn-primary-glow" 
-            onClick={onSubmit}
-          >
-            {title.includes('Add') ? 'Outsource Test' : 'Save Changes'}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
+  const exportPdf = async () => {
+    const label = new Date(`${month}-01T12:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    const bytes = await makeTablePdf({
+      title: `Outsourced tests — ${label}`,
+      subtitle: `${sent.length} tests · ${totals.pending} awaiting results`,
+      landscape: true,
+      columns: [{ header: 'Sent on', width: 10 }, { header: 'Patient', width: 16 }, { header: 'Order', width: 15 }, { header: 'Test', width: 18 }, { header: 'Partner lab', width: 16 }, { header: 'Status', width: 12 }, { header: 'Cost', width: 10, align: 'right' }],
+      rows: sent.map(s => [dateText(s.sentAt), s.patientName, s.orderNo || '', s.testName, s.lab?.name || '', STATUS[s.status]?.label || s.status, rupees(s.cost)]),
+      totals: ['', '', '', '', '', 'Total cost', rupees(totals.cost)],
+    });
+    downloadPdf(bytes, `outsourced-tests-${month}.pdf`);
+  };
 
   return (
     <AppLayout title="Outsource Labs" breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Outsource Labs' }]}>
-      
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Total Partners</p>
-            <p className="text-3xl font-bold text-foreground mt-2">{totalLabs}</p>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex rounded-lg border bg-card p-1">
+            {([['sent', 'Tests sent', Send], ['labs', 'Partner labs', Building2]] as const).map(([id, text, Icon]) => (
+              <button key={id} onClick={() => setTab(id)} className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                <Icon className="h-4 w-4" /> {text}
+              </button>
+            ))}
           </div>
-          <div className="h-12 w-12 rounded-xl bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-            <Building2 className="h-6 w-6" />
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Pending Tests</p>
-            <p className="text-3xl font-bold text-foreground mt-2">{pendingOutsourced}</p>
-          </div>
-          <div className="h-12 w-12 rounded-xl bg-yellow-50 dark:bg-yellow-950/30 flex items-center justify-center text-yellow-600 dark:text-yellow-400">
-            <Clock className="h-6 w-6" />
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Completed Tests</p>
-            <p className="text-3xl font-bold text-foreground mt-2">{completedOutsourced}</p>
-          </div>
-          <div className="h-12 w-12 rounded-xl bg-green-50 dark:bg-green-950/30 flex items-center justify-center text-green-600 dark:text-green-400">
-            <CheckCircle className="h-6 w-6" />
-          </div>
-        </div>
-
-        <div className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Total Cost</p>
-            <p className="text-3xl font-bold text-foreground mt-2">${totalCost}</p>
-          </div>
-          <div className="h-12 w-12 rounded-xl bg-purple-50 dark:bg-purple-950/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
-            <DollarSign className="h-6 w-6" />
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs system */}
-      <div className="flex border-b border-border mb-6">
-        <button
-          className={`py-3 px-6 text-sm font-semibold border-b-2 transition-all ${activeTab === 'labs' ? 'border-primary text-primary font-bold' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          onClick={() => setActiveTab('labs')}
-        >
-          Reference Labs (Partners)
-        </button>
-        <button
-          className={`py-3 px-6 text-sm font-semibold border-b-2 transition-all ${activeTab === 'tests' ? 'border-primary text-primary font-bold' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-          onClick={() => setActiveTab('tests')}
-        >
-          Outsourced Tests Tracker
-        </button>
-      </div>
-
-      <div className="space-y-4">
-        {/* Lab Tab Section */}
-        {activeTab === 'labs' && (
-          <>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input 
-                  type="text" 
-                  placeholder="Search partner labs..."
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border bg-background text-sm animate-fade-in-up"
-                  value={labSearchQuery}
-                  onChange={e => setLabSearchQuery(e.target.value)}
-                />
-              </div>
-              <motion.button 
-                whileHover={{ scale: 1.02 }} 
-                className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground btn-primary-glow self-start sm:self-auto" 
-                onClick={() => { setForm(emptyForm); setShowAddModal(true); }}
-              >
-                <Plus className="h-4 w-4" />
-                Add Partner
-              </motion.button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
-              {filteredLabs.map((lab, i) => (
-                <motion.div key={lab.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                  className="rounded-xl border bg-card p-5 shadow-sm hover:shadow-md transition-all duration-200">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-950/50"><Building2 className="h-5 w-5 text-purple-600 dark:text-purple-400" /></div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{lab.name}</p>
-                        <p className="text-xs text-muted-foreground">{lab.address}</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="btn-action" onClick={() => openEdit(lab)} title="Edit Lab">
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button className="btn-action text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20" onClick={() => handleDeleteLab(lab.id)} title="Delete Lab">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-muted-foreground/75" />{lab.mobile || 'N/A'}</div>
-                    <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-muted-foreground/75" />{lab.email || 'N/A'}</div>
-                  </div>
-                  <div className="mt-4 flex items-center justify-between border-t pt-3 border-border/50">
-                    <span className={`badge ${lab.pendingTests > 0 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/50 dark:text-yellow-400' : 'bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400'}`}>
-                      {lab.pendingTests > 0 ? `${lab.pendingTests} pending` : 'All clear'}
-                    </span>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-
-            {filteredLabs.length === 0 && (
-              <div className="text-center py-12 border-2 border-dashed rounded-xl border-border bg-card">
-                <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-                <h3 className="text-base font-semibold text-foreground">No partner labs found</h3>
-                <p className="text-xs text-muted-foreground mt-1">Configure reference labs to outsource diagnostic tests.</p>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Tests Tab Section */}
-        {activeTab === 'tests' && (
-          <>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input 
-                  type="text" 
-                  placeholder="Search outsourced tests..."
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border bg-background text-sm"
-                  value={testSearchQuery}
-                  onChange={e => setTestSearchQuery(e.target.value)}
-                />
-              </div>
-              <motion.button 
-                whileHover={{ scale: 1.02 }} 
-                className="flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground btn-primary-glow self-start sm:self-auto" 
-                onClick={() => {
-                  if (labs.length === 0) {
-                    setToast({ message: 'Please add a reference lab first', type: 'error' });
-                    return;
-                  }
-                  setTestForm({
-                    patientName: '',
-                    testName: '',
-                    partnerLab: labs[0].name,
-                    outsourceDate: new Date().toISOString().split('T')[0],
-                    status: 'Pending',
-                    cost: 0
-                  });
-                  setShowAddTestModal(true);
-                }}
-              >
-                <Plus className="h-4 w-4" />
-                Outsource Test
-              </motion.button>
-            </div>
-
-            {filteredTests.length > 0 ? (
-              <div className="overflow-x-auto rounded-xl border bg-card shadow-sm mt-2">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b bg-muted/30">
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Patient Name</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Test Name</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Reference Lab</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Outsource Date</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Cost</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider">Status</th>
-                      <th className="px-5 py-3.5 text-xs font-bold text-muted-foreground uppercase tracking-wider text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {filteredTests.map((test) => (
-                      <tr key={test.id} className="hover:bg-muted/10 transition-colors">
-                        <td className="px-5 py-3.5 text-sm font-semibold text-foreground">{test.patientName}</td>
-                        <td className="px-5 py-3.5 text-sm text-foreground">{test.testName}</td>
-                        <td className="px-5 py-3.5 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1.5">
-                            <Building2 className="h-4 w-4 text-purple-500" />
-                            {test.partnerLab}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-sm text-muted-foreground">{test.outsourceDate}</td>
-                        <td className="px-5 py-3.5 text-sm font-medium text-foreground">${test.cost}</td>
-                        <td className="px-5 py-3.5 text-sm">
-                          <span className={`badge ${
-                            test.status === 'Completed'
-                              ? 'bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400'
-                              : test.status === 'Pending'
-                              ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950/50 dark:text-yellow-400'
-                              : 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400'
-                          }`}>
-                            {test.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-sm text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button className="btn-action" onClick={() => openEditTest(test)} title="Edit Test">
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button className="btn-action text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20" onClick={() => handleDeleteTest(test.id)} title="Delete Test">
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {tab === 'sent' && <input type="month" aria-label="Month" value={month} onChange={e => { setMonth(e.target.value); load(e.target.value); }} className={`${inputCls} w-44`} />}
+          <div className="ml-auto flex gap-2">
+            {tab === 'sent' ? (
+              <>
+                <button onClick={exportPdf} className={btnGhost}><FileText className="h-4 w-4" /> PDF register</button>
+                <button onClick={() => (activeLabs.length ? setSentForm({ ...emptySent, labId: String(activeLabs[0].id) }) : (setTab('labs'), showToast('Add a partner lab first', 'error')))} className={btnPrimary}><Plus className="h-4 w-4" /> Send a test</button>
+              </>
             ) : (
-              <div className="text-center py-12 border-2 border-dashed rounded-xl border-border bg-card mt-2">
-                <FlaskConical className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-                <h3 className="text-base font-semibold text-foreground">No outsourced tests found</h3>
-                <p className="text-xs text-muted-foreground mt-1">Configure reference labs and outsource tests to track them here.</p>
-              </div>
+              <button onClick={() => setLabForm({ ...emptyLab })} className={btnPrimary}><Plus className="h-4 w-4" /> Add partner lab</button>
             )}
+          </div>
+        </div>
+
+        {tab === 'sent' ? (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className={`${card} p-5`}><div className="text-xs font-medium text-muted-foreground">Tests sent this month</div><div className="mt-1 text-2xl font-bold">{sent.length}</div></div>
+              <div className={`${card} p-5`}><div className="text-xs font-medium text-muted-foreground">Awaiting results</div><div className="mt-1 text-2xl font-bold text-amber-600">{totals.pending}</div></div>
+              <div className={`${card} p-5`}><div className="text-xs font-medium text-muted-foreground">Cost this month</div><div className="mt-1 text-2xl font-bold tabular-nums" data-testid="outsource-cost">{rupees(totals.cost)}</div></div>
+            </div>
+            <div className={`${card} overflow-hidden`}>
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/40"><tr><th className={th}>Sent on</th><th className={th}>Patient</th><th className={th}>Test</th><th className={th}>Partner lab</th><th className={`${th} text-right`}>Cost</th><th className={th}>Status</th><th className={`${th} text-right`}>Actions</th></tr></thead>
+                <tbody className="divide-y">
+                  {sent.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">No tests sent out this month.</td></tr>}
+                  {sent.map(s => (
+                    <tr key={s.id} data-testid={`outsourced-row-${s.testName}`}>
+                      <td className={td}>{dateText(s.sentAt)}</td>
+                      <td className={td}><div className="font-medium">{s.patientName}</div>{s.orderNo && <div className="font-mono text-xs text-muted-foreground">{s.orderNo}</div>}</td>
+                      <td className={td}>{s.testName}</td>
+                      <td className={`${td} text-muted-foreground`}>{s.lab?.name}</td>
+                      <td className={`${td} text-right tabular-nums`}>{rupees(s.cost)}</td>
+                      <td className={td}>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS[s.status]?.cls || ''}`}>{STATUS[s.status]?.label || s.status}</span>
+                        {s.resultReceivedAt && <div className="text-xs text-muted-foreground">{dateText(s.resultReceivedAt)}</div>}
+                      </td>
+                      <td className={td}>
+                        <div className="flex justify-end gap-1.5">
+                          {s.status === 'PENDING' && <button className={`${btnPrimary} h-8 px-2.5 text-xs`} onClick={() => setStatus(s, 'COMPLETED')}><CheckCircle2 className="h-3.5 w-3.5" />Result received</button>}
+                          {s.status === 'PENDING' && <button className="btn-action" title="Cancel" aria-label={`Cancel ${s.testName}`} onClick={() => setStatus(s, 'CANCELLED')}><XCircle className="h-4 w-4" /></button>}
+                          <button className="btn-action" aria-label={`Edit ${s.testName}`} onClick={() => setSentForm({ id: s.id, labId: String(s.labId), patientName: s.patientName, orderNo: s.orderNo || '', testName: s.testName, cost: String(s.cost), sentAt: new Date(s.sentAt).toISOString().slice(0, 10), notes: s.notes || '' })}><Edit className="h-4 w-4" /></button>
+                          {can(role, 'bill:delete') && <button className="btn-action text-destructive" aria-label={`Delete ${s.testName}`} onClick={() => removeSent(s)}><Trash2 className="h-4 w-4" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
+        ) : (
+          <div className={`${card} overflow-hidden`}>
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/40"><tr><th className={th}>Lab</th><th className={th}>Phone</th><th className={th}>Email</th><th className={th}>Address</th><th className={th}>Status</th><th className={`${th} text-right`}>Actions</th></tr></thead>
+              <tbody className="divide-y">
+                {labs.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">No partner labs yet.</td></tr>}
+                {labs.map(l => (
+                  <tr key={l.id} className={l.isActive ? '' : 'opacity-60'}>
+                    <td className={`${td} font-medium`}>{l.name}</td>
+                    <td className={`${td} text-muted-foreground`}>{l.mobile || '—'}</td>
+                    <td className={`${td} text-muted-foreground`}>{l.email || '—'}</td>
+                    <td className={`${td} text-muted-foreground`}>{l.address || '—'}</td>
+                    <td className={td}>{l.isActive ? 'Active' : 'Inactive'}</td>
+                    <td className={td}>
+                      <div className="flex justify-end gap-1.5">
+                        <button className="btn-action" aria-label={`Edit ${l.name}`} onClick={() => setLabForm({ id: l.id, name: l.name, mobile: l.mobile || '', email: l.email || '', address: l.address || '' })}><Edit className="h-4 w-4" /></button>
+                        <button className={`${btnGhost} h-8 px-2.5 text-xs`} onClick={() => toggleLab(l)}>{l.isActive ? 'Deactivate' : 'Activate'}</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
-      {/* Modals AnimatePresence */}
-      <AnimatePresence>
-        {showAddModal && renderLabModal(handleAdd, 'Add Partner Lab', () => { setShowAddModal(false); setForm(emptyForm); })}
-        {showEditModal && editTarget && renderLabModal(handleEdit, 'Edit Partner Lab', () => { setShowEditModal(false); setEditTarget(null); setForm(emptyForm); })}
-        
-        {showAddTestModal && renderTestModal(handleAddTest, 'Outsource New Test', () => setShowAddTestModal(false))}
-        {showEditTestModal && editTestTarget && renderTestModal(handleEditTest, 'Edit Outsourced Test', () => { setShowEditTestModal(false); setEditTestTarget(null); })}
-      </AnimatePresence>
-
-      {/* Notification Toast */}
-      {toast && (
-        <div className={`toast-global ${toast.type === 'success' ? 'toast-success' : 'toast-error'} z-[200]`}>
-          {toast.message}
-        </div>
+      {labForm && (
+        <Modal title={labForm.id ? 'Edit partner lab' : 'Add partner lab'} onClose={() => setLabForm(null)}>
+          <form onSubmit={saveLab} className="grid grid-cols-2 gap-4">
+            <Field label="Lab name *" className="col-span-2"><input type="text" required value={labForm.name} onChange={e => setLabForm({ ...labForm, name: e.target.value })} className={inputCls} /></Field>
+            <Field label="Phone"><input type="tel" value={labForm.mobile} onChange={e => setLabForm({ ...labForm, mobile: e.target.value })} className={inputCls} /></Field>
+            <Field label="Email"><input type="email" value={labForm.email} onChange={e => setLabForm({ ...labForm, email: e.target.value })} className={inputCls} /></Field>
+            <Field label="Address" className="col-span-2"><input type="text" value={labForm.address} onChange={e => setLabForm({ ...labForm, address: e.target.value })} className={inputCls} /></Field>
+            <div className="col-span-2 mt-2 flex justify-end gap-2">
+              <button type="button" onClick={() => setLabForm(null)} className={btnGhost}>Cancel</button>
+              <button type="submit" className={btnPrimary}>Save lab</button>
+            </div>
+          </form>
+        </Modal>
       )}
+
+      {sentForm && (
+        <Modal title={sentForm.id ? 'Edit outsourced test' : 'Send a test to a partner lab'} onClose={() => setSentForm(null)} wide>
+          <form onSubmit={saveSent} className="grid grid-cols-2 gap-4">
+            <Field label="Partner lab *" className="col-span-2">
+              <select required value={sentForm.labId} onChange={e => setSentForm({ ...sentForm, labId: e.target.value })} className={inputCls}>
+                {labs.filter(l => l.isActive || String(l.id) === sentForm.labId).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Patient name *"><input type="text" required value={sentForm.patientName} onChange={e => setSentForm({ ...sentForm, patientName: e.target.value })} className={inputCls} /></Field>
+            <Field label="Order no. (optional)"><input type="text" value={sentForm.orderNo} onChange={e => setSentForm({ ...sentForm, orderNo: e.target.value })} className={inputCls} /></Field>
+            <Field label="Test *"><input type="text" required value={sentForm.testName} onChange={e => setSentForm({ ...sentForm, testName: e.target.value })} className={inputCls} placeholder="e.g. Vitamin D" /></Field>
+            <Field label="Cost (₹)"><input type="number" min="0" step="any" value={sentForm.cost} onChange={e => setSentForm({ ...sentForm, cost: e.target.value })} className={inputCls} /></Field>
+            <Field label="Sent on"><input type="date" value={sentForm.sentAt} onChange={e => setSentForm({ ...sentForm, sentAt: e.target.value })} className={inputCls} /></Field>
+            <Field label="Notes"><input type="text" value={sentForm.notes} onChange={e => setSentForm({ ...sentForm, notes: e.target.value })} className={inputCls} /></Field>
+            <div className="col-span-2 mt-2 flex justify-end gap-2">
+              <button type="button" onClick={() => setSentForm(null)} className={btnGhost}>Cancel</button>
+              <button type="submit" className={btnPrimary}>Save</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      <ToastView toast={toast} />
     </AppLayout>
   );
 }

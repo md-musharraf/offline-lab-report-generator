@@ -393,16 +393,8 @@ export default function DashboardPage() {
         o.expectedAt && new Date(o.expectedAt) < now && !['APPROVED', 'DELIVERED'].includes(o.status)
       ).length;
 
-      let lowStockAlerts = 0;
-      if (typeof window !== 'undefined') {
-        const storedInventory = localStorage.getItem('pathology_lab_inventory');
-        if (storedInventory) {
-          try {
-            const inv = JSON.parse(storedInventory);
-            lowStockAlerts = inv.filter((item: any) => item.stock < item.min).length;
-          } catch (e) {}
-        }
-      }
+      const stock = await db.query('inventoryItem', 'findMany', { where: { isActive: true }, select: { currentStock: true, minStock: true } }).catch(() => []);
+      const lowStockAlerts = (stock || []).filter((i: any) => i.currentStock <= i.minStock).length;
 
       // Recent Patients List
       const recentPatients = orders.slice(0, 5).map((o: any) => {
@@ -541,8 +533,11 @@ export default function DashboardPage() {
   };
 
   const [staffToday, setStaffToday] = useState<any[]>([]);
-  const loadStaffToday = () =>
+  const [money, setMoney] = useState<{ visible: boolean; revenue: number; expenses: number; net: number } | null>(null);
+  const loadStaffToday = () => {
     fetch('/api/dashboard/staff').then(r => r.json()).then(d => d.success && setStaffToday(d.rows)).catch(() => {});
+    fetch('/api/dashboard/money').then(r => r.json()).then(d => d.success && setMoney(d)).catch(() => {});
+  };
 
   useEffect(() => {
     fetchDashboardData();
@@ -621,6 +616,22 @@ export default function DashboardPage() {
             Quick Patient Entry & Results
           </button>
         </div>
+
+        {/* Owner only: this month's money in, money out, net */}
+        {money?.visible && (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3" data-testid="month-money">
+            {[
+              { label: 'Collected this month', value: money.revenue, cls: '' },
+              { label: 'Expenses this month', value: money.expenses, cls: '' },
+              { label: money.net >= 0 ? 'Net profit this month' : 'Net loss this month', value: money.net, cls: money.net >= 0 ? 'text-green-700 dark:text-green-400' : 'text-destructive' },
+            ].map(m => (
+              <div key={m.label} className="rounded-xl border bg-card p-5 shadow-sm">
+                <div className="text-xs font-medium text-muted-foreground">{m.label}</div>
+                <div className={`mt-1 text-2xl font-bold tabular-nums ${m.cls}`}>₹{Math.abs(m.value).toLocaleString('en-IN')}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Shift summary: what each person did today (owner sees everyone, others see themselves) */}
         {staffToday.length > 0 && (

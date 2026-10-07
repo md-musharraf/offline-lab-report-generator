@@ -12,6 +12,7 @@ const { buildASTMFrame } = require('../lib/machineServer');
 const { encryptLicenseKey, getMachineId } = require('../lib/server-api');
 
 const OWNER = { name: 'Dr. Owner', email: 'owner@lab.com', password: 'Owner@123' };
+let recoveryCode = '';
 
 const go = (page: Page, route: string) => page.evaluate(r => (window as any).next.router.push(r), route);
 const dbQuery = (page: Page, model: string, action: string, args: any) =>
@@ -32,6 +33,8 @@ async function completeSetup(page: Page) {
   await page.getByPlaceholder('••••••••').nth(1).fill(OWNER.password);
   await page.getByRole('button', { name: /Build Lab/ }).click();
   await expect(page.getByText('Lab Setup Complete!')).toBeVisible({ timeout: 60_000 });
+  recoveryCode = (await page.getByText(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/).textContent()) || '';
+  await page.getByLabel('I have written down this code').check();
   await page.getByRole('button', { name: 'Launch Dashboard' }).click();
   await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
 }
@@ -76,6 +79,23 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect(page.getByText('City Path Lab,')).toBeVisible();
     await signIn(page, 'wrong-password');
     await expect(page.getByRole('alert').filter({ hasText: /Invalid/i })).toBeVisible();
+    await signIn(page);
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  });
+
+  test('owner forgot the password: the recovery code resets it and shows the login email', async () => {
+    await page.getByRole('button', { name: new RegExp(OWNER.name) }).click();
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+    await page.getByRole('button', { name: 'Forgot password or email?' }).click();
+    await page.getByLabel('Recovery code').fill(recoveryCode.toLowerCase());
+    await page.getByLabel('New password', { exact: true }).fill('Owner@456');
+    await page.getByLabel('Confirm new password').fill('Owner@456');
+    await page.getByRole('button', { name: 'Reset password' }).click();
+    await expect(page.getByText(OWNER.email)).toBeVisible();
+    await page.getByLabel('I have written down this code').check();
+    await page.getByRole('button', { name: 'Back to sign in' }).click();
+    await expect(page.getByLabel('Email address')).toHaveValue(OWNER.email);
+    OWNER.password = 'Owner@456';
     await signIn(page);
     await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
   });
