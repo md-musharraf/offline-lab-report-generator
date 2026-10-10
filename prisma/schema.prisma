@@ -146,6 +146,7 @@ model TestParameter {
   sortOrder       Int       @default(0)
   type            String    @default("NUMERIC") // ParameterType enum
   options         String?   // JSON array for dropdown type
+  printRefRange   Boolean   @default(false) // dropdown type: print its reference range on the report
   formula         String?   // for calculated fields
   isHeader        Boolean   @default(false)  // section header row
   refRanges       ReferenceRange[]

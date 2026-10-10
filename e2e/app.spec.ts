@@ -122,6 +122,25 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect.poll(() => fs.readFileSync(pdf).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  test('Quick Entry: dropdown parameters offer their choices; their range is not printed unless ticked', async () => {
+    await go(page, '/dashboard'); // leave the previous patient's finished Quick Entry
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+    await page.keyboard.press('F2');
+    await expect(page.getByRole('heading', { name: /Quick Entry/ })).toBeVisible();
+    await page.getByPlaceholder('Enter full name').fill('Meena Kumari');
+    await page.getByPlaceholder('10-digit number').fill('9876500001');
+    await page.getByPlaceholder('Age').fill('29');
+    await page.getByRole('button', { name: 'Urine R/M', exact: true }).click();
+    await page.getByRole('button', { name: 'Register & Enter Results' }).click();
+    await page.locator('select', { has: page.locator('option', { hasText: 'Dark Yellow' }) }).selectOption('Dark Yellow');
+    await page.getByRole('button', { name: 'Save Results & Generate Report' }).click();
+    await expect(page.getByText(/registered successfully under order ID/)).toBeVisible();
+
+    const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: 'Meena Kumari' } }, include: { report: true } });
+    const color = JSON.parse(order.report.snapshot).tests[0].rows.find((r: any) => r.name === 'Color');
+    expect(color).toMatchObject({ value: 'Dark Yellow', range: '' });
+  });
+
   test('Ctrl+K finds the patient and opens their record', async () => {
     await page.keyboard.press('Control+K');
     await page.getByRole('combobox').fill('Rajesh');

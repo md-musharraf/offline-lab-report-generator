@@ -449,6 +449,12 @@ test('a critical result keeps which way it is out of range, so the report can pr
   assert.equal(rowFor({ numericValue: 9, flag: '↑' }).flag, 'H');
 });
 
+test('a dropdown reference range prints only when the lab ticks "Print reference range"', () => {
+  const { build } = require('../lib/report-data');
+  const rangeFor = extra => build({ orderNo: 'X', status: 'RESULT_ENTERED', patient: { age: 30, gender: 'MALE' }, items: [{ test: { name: 'Urine R/M', parameters: [{ id: 1, name: 'Color', type: 'DROPDOWN', sortOrder: 1, refRanges: [{ textNormal: 'Pale Yellow' }], ...extra }] }, results: [{ parameterId: 1, textValue: 'Yellow' }] }] }).data.tests[0].rows[0].range;
+  assert.deepEqual([rangeFor({}), rangeFor({ printRefRange: true }), rangeFor({ type: 'TEXT' })], ['', 'Pale Yellow', 'Pale Yellow']);
+});
+
 test('older data is upgraded on start-up: order prices filled in, analyzer orders reach Results and Reports', async () => {
   const { cbc } = await cbcWithHb();
   const old = await prisma.testOrder.create({ data: { orderNo: 'OLD-ANALYZER-1', patientId: frozenPid, status: 'VERIFIED', items: { create: [{ testId: cbc.id, status: 'VERIFIED' }] } } });

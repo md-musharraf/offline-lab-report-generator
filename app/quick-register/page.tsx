@@ -1741,10 +1741,23 @@ function QuickRegisterContent() {
                                             ? `border-green-500 text-green-500 ${calculatedBgClass}` 
                                             : `border-border ${calculatedBgClass}`;
 
+                                    if (param.type === 'DROPDOWN') return (
+                                      <select
+                                        value={resultState.value}
+                                        onChange={(e) => handleResultValChange(param, e.target.value)}
+                                        className={`w-full px-3 py-1.5 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${inputBorderClass}`}
+                                      >
+                                        <option value="" className="bg-card text-foreground">Select...</option>
+                                        {param.options?.split(',').map((opt: string) => (
+                                          <option key={opt} value={opt.trim()} className="bg-card text-foreground">{opt.trim()}</option>
+                                        ))}
+                                      </select>
+                                    );
+
                                     return (
                                       <div className="relative flex items-center w-full">
-                                        <input 
-                                          type="text" 
+                                        <input
+                                          type="text"
                                           placeholder="Enter result value"
                                           readOnly={isParamCalc && !isOverridden}
                                           value={resultState.value}

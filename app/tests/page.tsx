@@ -23,6 +23,7 @@ interface ParameterForm {
   sortOrder: number;
   type: 'NUMERIC' | 'TEXT' | 'DROPDOWN' | 'CALCULATED';
   options: string;
+  printRefRange: boolean;
   isHeader: boolean;
   refRanges: RefRangeForm[];
 }
@@ -223,6 +224,7 @@ export default function TestsPage() {
             sortOrder: p.sortOrder || 1,
             type: p.type || 'NUMERIC',
             options: p.options || '',
+            printRefRange: !!p.printRefRange,
             isHeader: p.isHeader || false,
             refRanges: (p.refRanges || []).map((r: any) => ({
               id: r.id,
@@ -269,6 +271,7 @@ export default function TestsPage() {
       sortOrder: form.parameters.length + 1,
       type: 'NUMERIC',
       options: '',
+      printRefRange: false,
       isHeader: false,
       refRanges: []
     };
@@ -358,6 +361,7 @@ export default function TestsPage() {
         sortOrder: pIdx + 1,
         type: p.type,
         options: p.options || null,
+        printRefRange: p.printRefRange,
         isHeader: p.isHeader,
         refRanges: p.refRanges.map(r => ({
           gender: r.gender,
@@ -624,6 +628,10 @@ export default function TestsPage() {
                             <div className="border border-border bg-card p-3 rounded-xl">
                               <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Dropdown Choices *</label>
                               <input className={inputClass} value={param.options} onChange={e => updateParameterField(pIdx, 'options', e.target.value)} placeholder="Comma-separated options, e.g. Positive, Negative, Borderline" />
+                              <label className="flex items-center gap-2 text-xs font-bold text-foreground cursor-pointer select-none mt-2.5">
+                                <input type="checkbox" checked={param.printRefRange} onChange={e => updateParameterField(pIdx, 'printRefRange', e.target.checked)} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
+                                Print reference range on report
+                              </label>
                             </div>
                           )}
 
