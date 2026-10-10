@@ -1,5 +1,5 @@
 # Every push to main builds the installer and runs every test against it. Pushing a version tag
-# (git tag v1.7.2 && git push origin v1.7.2) does the same and then publishes the installer as a GitHub Release,
+# (git tag vX.Y.Z && git push origin vX.Y.Z) does the same and then publishes the installer as a GitHub Release,
 # which installed apps download by themselves (electron-updater, see startAutoUpdates in main.js).
 # A failing test publishes nothing.
 name: Release

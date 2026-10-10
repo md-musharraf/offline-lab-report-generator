@@ -116,12 +116,12 @@ Installed apps update themselves from this repo's GitHub Releases (electron-upda
 closes JharLab (or at once from "Restart now"). To ship an update, bump the version, commit, then push a tag:
 
 ```bash
-npm version 1.7.1 --no-git-tag-version
-git commit -am "v1.7.1: ..."
-git tag v1.7.1
-git push origin main v1.7.1
+npm version 1.7.3 --no-git-tag-version
+git commit -am "v1.7.3: ..."
+git tag v1.7.3
+git push origin main v1.7.3
 ```
 
 `.github/workflows/release.yml` builds the installer, runs `npm test` and the packaged E2E suite, and only then
 publishes the release. A tag that fails any test publishes nothing. Every published release reaches every lab,
-so follow `.claude/skills/safe-update` first. Labs on 1.6.0 or older install 1.7.0 once by hand.
+so follow `.claude/skills/safe-update` first. Labs on 1.6.0 or older install 1.7.2 (the first self-updating release) once by hand. Never reuse a version number: v1.7.0 and v1.7.1 are tags without a release.
