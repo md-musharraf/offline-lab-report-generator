@@ -52,7 +52,7 @@ Requirements: Node 20+ and Windows 10/11 (the installer target). The app is Elec
 npm install
 npm run electron:dev      # next dev + Electron (database: prisma/dev.db, created automatically)
 npm run build             # prisma client + prisma/schema.sql + static export to out/
-npm run electron:build    # build + Windows installer -> dist/JharLab Setup <version>.exe
+npm run electron:build    # build + Windows installer -> dist/JharLab-Setup-<version>.exe
 npm test                  # backend + analyzer (ASTM/HL7 over real TCP) tests against real SQLite
 npm run test:e2e          # Electron end-to-end tests on out/ (run `npm run build` first)
 ```
@@ -107,4 +107,21 @@ All data (patients, bills, results, staff, samples, home collections, outsourced
 expenses, stock) lives in one local SQLite file, so it works without internet and is included in every backup.
 PDFs are made on demand on the PC (reports, bills, barcode sample labels, expense statements, stock register,
 outsourcing register, home-collection run sheets); nothing is uploaded. The only online calls are the licence
-check and the update check against the admin dashboard.
+check against the admin dashboard and the update check against GitHub Releases.
+
+### Updates
+
+Installed apps update themselves from this repo's GitHub Releases (electron-updater, `startAutoUpdates` in
+`main.js`): checked at start and every 4 hours, downloaded in the background, installed silently when the lab
+closes JharLab (or at once from "Restart now"). To ship an update, bump the version, commit, then push a tag:
+
+```bash
+npm version 1.7.1 --no-git-tag-version
+git commit -am "v1.7.1: ..."
+git tag v1.7.1
+git push origin main v1.7.1
+```
+
+`.github/workflows/release.yml` builds the installer, runs `npm test` and the packaged E2E suite, and only then
+publishes the release. A tag that fails any test publishes nothing. Every published release reaches every lab,
+so follow `.claude/skills/safe-update` first. Labs on 1.6.0 or older install 1.7.0 once by hand.

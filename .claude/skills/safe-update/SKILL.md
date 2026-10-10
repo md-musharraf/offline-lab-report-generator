@@ -1,6 +1,6 @@
 ---
 name: safe-update
-description: Rules for changing or releasing the JharLab offline desktop app so an update never loses a lab's data (logins, patients, reports, bills, settings) or breaks sign-in. Use before editing prisma/schema.prisma, upgradeData/ensureSchema, login or password code, main.js database/userData/backup code, or package.json name/appId/productName/version; before building or releasing an installer; and when a lab reports "data gone" or "can't log in" after an update.
+description: Rules for changing or releasing the JharLab offline desktop app (a pushed v* tag auto-updates every lab) so an update never loses a lab's data (logins, patients, reports, bills, settings) or breaks sign-in. Use before editing prisma/schema.prisma, upgradeData/ensureSchema, login or password code, main.js database/userData/backup code, or package.json name/appId/productName/version; before building or releasing an installer; and when a lab reports "data gone" or "can't log in" after an update.
 ---
 
 # JharLab: updates without data loss
@@ -56,6 +56,11 @@ report, bill or setting. When a rule below and a requested change conflict, stop
 5. Optional real-data check: copy (never move) a real lab's `dev.db` and `dev.db-wal` to a temp folder, run
    `api.upgradeDatabase` on the copy, and compare row counts before and after.
 6. Commit, tag `vX.Y.Z`. Push only when the user asks.
+7. Pushing a `v*` tag RELEASES TO EVERY LAB: `.github/workflows/release.yml` repeats steps 3-4 on a clean
+   Windows runner and, if all pass, publishes a GitHub Release that installed apps download and install on
+   their own (electron-updater, `startAutoUpdates` in main.js). Never push a tag that skipped steps 1-5.
+   The tag must equal `v` + package.json version or the workflow stops. A bad release cannot be recalled from
+   PCs that already installed it: fix forward with a higher version (never reuse or delete a version number).
 
 ## Never
 
