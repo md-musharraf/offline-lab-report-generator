@@ -1,5 +1,6 @@
 // End-to-end: the real desktop app (Electron + static export + SQLite) driven like a lab would use it.
 import { test, expect, type Page } from '@playwright/test';
+import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
@@ -246,7 +247,7 @@ test.describe.serial('a lab day on a fresh install', () => {
   });
 });
 
-test('admin dashboard: pause locks the app, resume unlocks, offline keeps working; updates are offered', async () => {
+test('admin dashboard: pause locks the app, resume unlocks, offline keeps working', async () => {
   test.setTimeout(240_000);
   const machineId = getMachineId();
   const expiry = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
@@ -254,9 +255,6 @@ test('admin dashboard: pause locks the app, resume unlocks, offline keeps workin
   const admin = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (req.url!.startsWith('/api/license/status')) return res.end(JSON.stringify({ success: true, machineId, expiryDate: expiry, ...state }));
-    if (req.url!.startsWith('/api/updates/latest')) {
-      return res.end(JSON.stringify({ success: true, update: { version: '9.9.9', title: 'Faster reports', releaseNotes: 'New report layouts', downloadUrl: 'https://example.invalid/JharLab-9.9.9.exe' } }));
-    }
     res.statusCode = 404;
     res.end('{}');
   });
@@ -265,10 +263,8 @@ test('admin dashboard: pause locks the app, resume unlocks, offline keeps workin
 
   const { app, page } = await launchApp('admin-control', { NEXT_PUBLIC_ADMIN_DASHBOARD_URL: adminUrl });
   try {
-    // ACTIVE + key from the dashboard: no lock screen, key stored locally, update offered.
+    // ACTIVE + key from the dashboard: no lock screen, key stored locally.
     await expect(page.getByText(/Set up|Laboratory Information|Initialize/i).first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText('Update available')).toBeVisible();
-    await expect(page.getByText('v9.9.9')).toBeVisible();
 
     state.status = 'PAUSED';
     await expect(page.getByText(/temporarily PAUSED by the administrator/)).toBeVisible({ timeout: 30_000 });
@@ -285,6 +281,43 @@ test('admin dashboard: pause locks the app, resume unlocks, offline keeps workin
   } finally {
     await app.close();
     admin.close();
+  }
+});
+
+test('updates: a newer release downloads by itself, then offers Restart now', async () => {
+  test.skip(process.env.E2E_PACKAGED !== '1', 'only the installed app updates itself');
+  const installer = Buffer.from('stand-in installer, never run');
+  const sha512 = crypto.createHash('sha512').update(installer).digest('base64');
+  const feed = http.createServer((req, res) => {
+    const file = new URL(req.url!, 'http://feed').pathname;
+    if (file === '/latest.yml') {
+      return res.end(`version: 9.9.9
+files:
+  - url: JharLab-Setup-9.9.9.exe
+    sha512: ${sha512}
+    size: ${installer.length}
+path: JharLab-Setup-9.9.9.exe
+sha512: ${sha512}
+releaseDate: '2026-10-11T00:00:00.000Z'
+`);
+    }
+    if (file === '/JharLab-Setup-9.9.9.exe') return res.end(installer);
+    res.statusCode = 404;
+    res.end();
+  });
+  await new Promise<void>(r => feed.listen(0, '127.0.0.1', () => r()));
+  const { app, page } = await launchApp('auto-update', {
+    JHARLAB_UPDATE_URL: `http://127.0.0.1:${(feed.address() as net.AddressInfo).port}`,
+    LOCALAPPDATA: path.join(__dirname, '..', '.e2e-data', 'auto-update', 'local'), // the updater's download cache
+  });
+  try {
+    await startTrialIfLocked(page);
+    await expect(page.getByText('Update ready')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText('v9.9.9')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Restart now' })).toBeVisible();
+  } finally {
+    await app.close();
+    feed.close();
   }
 });
 

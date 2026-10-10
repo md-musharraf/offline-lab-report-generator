@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { KeyRound, Copy, Check, AlertCircle, Cpu, Calendar, Lock, Loader2, Sparkles, X } from 'lucide-react';
+import { KeyRound, Copy, Check, AlertCircle, Cpu, Calendar, Lock, Loader2, Sparkles } from 'lucide-react';
 
 interface LicenseContextType {
   machineId: string;
@@ -34,13 +34,8 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // Software update state
-  const [updateInfo, setUpdateInfo] = useState<any | null>(null);
-
-  // Update downloading states
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'downloading' | 'installing' | 'error'>('idle');
-  const [updateErrorMessage, setUpdateErrorMessage] = useState<string | null>(null);
+  // A new version downloaded in the background (see startAutoUpdates in main.js)
+  const [update, setUpdate] = useState<{ version: string } | null>(null);
 
   const isElectron = () => {
     return typeof window !== 'undefined' && !!(window as any).electronAPI && !!(window as any).electronAPI.licenseCheck;
@@ -139,70 +134,12 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Check for software updates once the licence is active.
   useEffect(() => {
-    if (!isValid) return;
-    const isVersionNewer = (curr: string, next: string) => {
-      const a = curr.split('.').map(Number);
-      const b = String(next).split('.').map(Number);
-      for (let i = 0; i < 3; i++) {
-        if ((b[i] || 0) !== (a[i] || 0)) return (b[i] || 0) > (a[i] || 0);
-      }
-      return false;
-    };
-    fetch('/api/updates/check')
-      .then(res => (res.ok ? res.json() : null))
-      .then(data => {
-        if (data?.success && data.update && isVersionNewer(process.env.NEXT_PUBLIC_APP_VERSION || '0.0.0', data.update.version)) {
-          setUpdateInfo(data.update);
-        }
-      })
-      .catch(err => console.warn('Failed to check for software updates:', err));
-  }, [isValid]);
-
-  // Hook to handle Electron auto-update IPC listeners
-  useEffect(() => {
-    if (isElectron()) {
-      const unsubscribeProgress = (window as any).electronAPI.onUpdateProgress((data: any) => {
-        if (data && data.percent !== undefined) {
-          setDownloadProgress(data.percent);
-          setUpdateStatus('downloading');
-        }
-      });
-
-      const unsubscribeError = (window as any).electronAPI.onUpdateError((err: string) => {
-        setUpdateStatus('error');
-        setUpdateErrorMessage(err || 'Failed to download update.');
-      });
-
-      return () => {
-        unsubscribeProgress();
-        unsubscribeError();
-      };
-    }
+    const e = (window as any).electronAPI;
+    if (!e?.onUpdateReady) return;
+    e.updateStatus().then((u: any) => u && setUpdate(u));
+    return e.onUpdateReady(setUpdate);
   }, []);
-
-  const handleDownloadUpdate = async (e: React.MouseEvent) => {
-    if (isElectron()) {
-      e.preventDefault();
-      setUpdateStatus('downloading');
-      setDownloadProgress(0);
-      setUpdateErrorMessage(null);
-      
-      const res = await (window as any).electronAPI.downloadAndInstallUpdate(
-        updateInfo.downloadUrl,
-        updateInfo.version,
-        updateInfo.sha256
-      );
-      
-      if (res && res.success) {
-        setUpdateStatus('installing');
-      } else {
-        setUpdateStatus('error');
-        setUpdateErrorMessage(res?.error || 'Failed to start download.');
-      }
-    }
-  };
 
   const handleCopyMachineId = () => {
     if (typeof navigator !== 'undefined') {
@@ -311,7 +248,7 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
       <LicenseContext.Provider value={{ machineId, expiryDate, isValid, triggerRecheck: checkLicenseStatus }}>
         {children}
 
-        {updateInfo && (
+        {update && (
           <div role="status" className="fixed bottom-6 right-6 z-[9999] w-[360px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl animate-fade-in-up">
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -319,70 +256,23 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-semibold">Update available</h4>
-                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">v{updateInfo.version}</span>
-                  {updateInfo.isCritical && <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-destructive">Required</span>}
+                  <h4 className="text-sm font-semibold">Update ready</h4>
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">v{update.version}</span>
                 </div>
-                {updateInfo.title && <p className="mt-0.5 text-xs font-medium text-muted-foreground">{updateInfo.title}</p>}
+                <p className="mt-0.5 text-xs text-muted-foreground">It installs by itself when you close JharLab. Your lab data stays as it is.</p>
               </div>
-              {!updateInfo.isCritical && updateStatus !== 'downloading' && updateStatus !== 'installing' && (
-                <button
-                  aria-label="Dismiss update"
-                  onClick={() => {
-                    setUpdateInfo(null);
-                    setUpdateStatus('idle');
-                    setDownloadProgress(null);
-                    setUpdateErrorMessage(null);
-                  }}
-                  className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
             </div>
-
-            {updateStatus === 'idle' && updateInfo.releaseNotes && (
-              <p className="mt-3 max-h-32 overflow-y-auto whitespace-pre-line border-l-2 pl-3 text-xs leading-relaxed text-muted-foreground">{updateInfo.releaseNotes}</p>
-            )}
-
-            {(updateStatus === 'downloading' || updateStatus === 'installing') && (
-              <div className="mt-3 space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">{updateStatus === 'downloading' ? 'Downloading…' : 'Starting installer… JharLab will restart.'}</span>
-                  <span className="font-mono font-semibold text-primary">{downloadProgress ?? 0}%</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${downloadProgress ?? 0}%` }} />
-                </div>
-              </div>
-            )}
-
-            {updateStatus === 'error' && (
-              <div className="mt-3 flex gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{updateErrorMessage || 'The update could not be downloaded.'}</span>
-              </div>
-            )}
-
-            {(updateStatus === 'idle' || updateStatus === 'error') && (
-              <div className="mt-4 flex gap-2">
-                <a
-                  href={updateInfo.downloadUrl}
-                  onClick={handleDownloadUpdate}
-                  className="flex-1 rounded-lg bg-primary px-3 py-2 text-center text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  {updateStatus === 'error' ? 'Retry download' : 'Install update'}
-                </a>
-                {!updateInfo.isCritical && (
-                  <button
-                    onClick={() => (updateStatus === 'error' ? setUpdateStatus('idle') : setUpdateInfo(null))}
-                    className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-accent"
-                  >
-                    Later
-                  </button>
-                )}
-              </div>
-            )}
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => (window as any).electronAPI.updateInstall()}
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Restart now
+              </button>
+              <button onClick={() => setUpdate(null)} className="rounded-lg border px-3 py-2 text-xs font-medium hover:bg-accent">
+                Later
+              </button>
+            </div>
           </div>
         )}
       </LicenseContext.Provider>

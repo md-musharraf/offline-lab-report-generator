@@ -177,6 +177,7 @@ if (!app.requestSingleInstanceLock()) {
     else routeDevApiToMain();
     createWindow();
     machineServer.initMachineServer(prisma, () => mainWindow, userData);
+    startAutoUpdates();
     if (dbError) dialog.showErrorBox('JharLab could not open its database', dbError);
     if (recoveredFrom) {
       dialog.showMessageBox(mainWindow, {
@@ -305,35 +306,28 @@ ipcMain.handle('backup-restore', async (_e, file) => {
   }
 });
 
-// Downloads the installer published by the admin dashboard, verifies it when a sha256 is provided,
-// then runs it (NSIS one-click upgrades in place) and quits.
-ipcMain.handle('download-and-install-update', async (_e, { url, version, sha256 }) => {
-  const send = (channel, data) => mainWindow?.webContents.send(channel, data);
-  try {
-    if (!/^https:\/\//i.test(url)) throw new Error('Updates must be downloaded over HTTPS.');
-    const res = await net.fetch(url);
-    if (!res.ok) throw new Error(`Download failed: server returned ${res.status}`);
-    const total = Number(res.headers.get('content-length')) || 0;
-    const chunks = [];
-    let received = 0;
-    for await (const chunk of res.body) {
-      chunks.push(chunk);
-      received += chunk.length;
-      if (total) send('update-progress', { percent: Math.round((received / total) * 100), downloaded: received, total });
-    }
-    const file = Buffer.concat(chunks);
-    if (sha256 && require('crypto').createHash('sha256').update(file).digest('hex') !== sha256.toLowerCase()) {
-      throw new Error('Downloaded update failed its integrity check. Please try again.');
-    }
-    const dest = path.join(app.getPath('temp'), `jharlab-update-${String(version).replace(/[^\w.-]/g, '')}${path.extname(new URL(url).pathname) || '.exe'}`);
-    fs.writeFileSync(dest, file);
-    const err = await shell.openPath(dest);
-    if (err) throw new Error(err);
-    setTimeout(() => app.quit(), 500);
-    return { success: true };
-  } catch (error) {
-    console.error('Update installation failed:', error);
-    send('update-error', error.message);
-    return { success: false, error: error.message };
+// ==================== AUTO-UPDATE ====================
+// New versions come from GitHub Releases (.github/workflows/release.yml publishes one for every v* tag).
+// The installer downloads in the background (checked against its sha512) and installs silently when the
+// lab closes JharLab, or at once from "Restart now". No internet = no check, the lab keeps working.
+// Tests run on JHARLAB_USER_DATA and never update, unless JHARLAB_UPDATE_URL gives them a local feed.
+let updateReady = null;
+function startAutoUpdates() {
+  const testFeed = process.env.JHARLAB_UPDATE_URL;
+  if (!app.isPackaged || (process.env.JHARLAB_USER_DATA && !testFeed)) return;
+  const { autoUpdater } = require('electron-updater');
+  if (testFeed) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: testFeed });
+    autoUpdater.autoInstallOnAppQuit = false; // a test feed's "installer" is never run
   }
-});
+  autoUpdater.on('update-downloaded', info => {
+    updateReady = { version: info.version };
+    mainWindow?.webContents.send('update-ready', updateReady);
+  });
+  autoUpdater.on('error', err => console.warn('Update check failed:', err.message));
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  check();
+  setInterval(check, 4 * 60 * 60 * 1000);
+  ipcMain.handle('update-install', () => autoUpdater.quitAndInstall(true, true));
+}
+ipcMain.handle('update-status', () => updateReady);

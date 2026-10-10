@@ -17,17 +17,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   licenseCheck: () => ipcRenderer.invoke('license-check'),
   licenseActivate: (key) => ipcRenderer.invoke('license-activate', key),
   licenseRequestTrial: () => ipcRenderer.invoke('license-request-trial'),
-  // Auto-Update Methods via IPC
-  downloadAndInstallUpdate: (url, version, sha256) => ipcRenderer.invoke('download-and-install-update', { url, version, sha256 }),
-  onUpdateProgress: (callback) => {
+  // Auto-update: a downloaded update waits for "Restart now" or for the app to close
+  updateStatus: () => ipcRenderer.invoke('update-status'),
+  updateInstall: () => ipcRenderer.invoke('update-install'),
+  onUpdateReady: (callback) => {
     const listener = (event, data) => callback(data);
-    ipcRenderer.on('update-progress', listener);
-    return () => ipcRenderer.removeListener('update-progress', listener);
-  },
-  onUpdateError: (callback) => {
-    const listener = (event, data) => callback(data);
-    ipcRenderer.on('update-error', listener);
-    return () => ipcRenderer.removeListener('update-error', listener);
+    ipcRenderer.on('update-ready', listener);
+    return () => ipcRenderer.removeListener('update-ready', listener);
   },
   // Machine Interfacing Methods
   machineGetConfig: () => ipcRenderer.invoke('machine-get-config'),

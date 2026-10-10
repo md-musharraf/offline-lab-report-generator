@@ -1,6 +1,6 @@
 {
   "name": "jharlab",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "JharLab Laboratory Information System",
   "author": "Md Musharraf",
   "main": "main.js",
@@ -21,6 +21,7 @@
     "bcryptjs": "^2.4.3",
     "bwip-js": "^4.2.2",
     "dotenv": "^17.4.2",
+    "electron-updater": "6.8.9",
     "pdf-lib": "^1.17.1",
     "serialport": "^13.0.0"
   },
@@ -90,7 +91,13 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "JharLab-Setup-${version}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "md-musharraf",
+      "repo": "offline-lab-report-generator"
     }
   },
   "prisma": {
