@@ -27,7 +27,7 @@ interface Patient {
 
 const initialPatients: Patient[] = [];
 
-const emptyForm = { name: '', age: '', gender: 'Male', mobile: '', email: '', address: '', bloodGroup: '' };
+const emptyForm = { name: '', age: '', ageUnit: 'YEARS', gender: 'Male', mobile: '', email: '', address: '', bloodGroup: '' };
 
 export default function PatientsPage() {
   const router = useRouter();
@@ -352,9 +352,7 @@ export default function PatientsPage() {
       return;
     }
     const ageInt = parseInt(ageNum, 10);
-    let ageUnit = 'YEARS';
-    if (form.age.toUpperCase().includes('M')) ageUnit = 'MONTHS';
-    else if (form.age.toUpperCase().includes('D')) ageUnit = 'DAYS';
+    const ageUnit = form.ageUnit;
 
     const genderUpper = form.gender.toUpperCase();
 
@@ -399,9 +397,7 @@ export default function PatientsPage() {
     }
 
     const ageInt = parseInt(editForm.age.replace(/\D/g, ''), 10);
-    let ageUnit = 'YEARS';
-    if (editForm.age.toUpperCase().includes('M')) ageUnit = 'MONTHS';
-    else if (editForm.age.toUpperCase().includes('D')) ageUnit = 'DAYS';
+    const ageUnit = editForm.ageUnit;
 
     const genderUpper = editForm.gender.toUpperCase();
 
@@ -477,6 +473,7 @@ export default function PatientsPage() {
     setEditForm({
       name: p.name,
       age: p.age.replace(/[YMD]/gi, ''),
+      ageUnit: p.age.endsWith('M') ? 'MONTHS' : p.age.endsWith('D') ? 'DAYS' : 'YEARS',
       gender: p.gender,
       mobile: p.mobile,
       email: p.email,
@@ -514,7 +511,14 @@ export default function PatientsPage() {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={labelClass}>Age <span className="text-red-500">*</span></label>
-          <input type="text" className={inputClass} value={data.age} onChange={e => setData(prev => ({ ...prev, age: e.target.value }))} placeholder="e.g. 45" />
+          <div className="flex gap-2">
+            <input type="number" min={0} className={inputClass} value={data.age} onChange={e => setData(prev => ({ ...prev, age: e.target.value }))} placeholder="e.g. 45" />
+            <select className={`${inputClass} w-28 font-semibold`} value={data.ageUnit} onChange={e => setData(prev => ({ ...prev, ageUnit: e.target.value }))}>
+              <option value="YEARS">Years</option>
+              <option value="MONTHS">Months</option>
+              <option value="DAYS">Days</option>
+            </select>
+          </div>
         </div>
         <div>
           <label className={labelClass}>Gender</label>

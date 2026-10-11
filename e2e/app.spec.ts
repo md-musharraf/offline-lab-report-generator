@@ -151,6 +151,23 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect(page.getByText('Rajesh Kumar').first()).toBeVisible();
   });
 
+  test('Patients: a 9-month-old registers in months and stays in months after an edit', async () => {
+    await go(page, '/patients');
+    await page.getByRole('button', { name: 'Register Patient' }).click();
+    await page.getByPlaceholder('Full name').fill('Baby Ansh');
+    await page.getByPlaceholder('e.g. 45').fill('9');
+    await page.locator('select', { has: page.locator('option[value="MONTHS"]') }).selectOption('MONTHS');
+    await page.getByRole('button', { name: 'Register Patient', exact: true }).last().click();
+    await page.getByRole('button', { name: 'Stay on Patients Page' }).click();
+    const find = () => dbQuery(page, 'patient', 'findFirst', { where: { name: 'Baby Ansh' } });
+    expect(await find()).toMatchObject({ age: 9, ageUnit: 'MONTHS' });
+
+    await page.getByRole('row', { name: /Baby Ansh/ }).getByTitle('Edit Patient').click();
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page.getByText('Patient Baby Ansh updated successfully')).toBeVisible();
+    expect(await find()).toMatchObject({ age: 9, ageUnit: 'MONTHS' });
+  });
+
   test('analyzer: results sent over LAN (ASTM) land in the waiting order', async () => {
     const order = await registerPatient(page, 'Sunita Devi', '38');
     const port = await new Promise<number>(r => { const s = net.createServer().listen(0, () => { const p = (s.address() as net.AddressInfo).port; s.close(() => r(p)); }); });
