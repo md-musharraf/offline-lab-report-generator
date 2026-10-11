@@ -265,14 +265,15 @@ test('backups are real database copies; restore only accepts JharLab backups', a
   assert.deepEqual(new Set(list.map(b => b.type)), new Set(['MANUAL', 'AUTO']));
 });
 
-test('editing a test keeps parameter ids, so saved results stay attached', async () => {
+test('editing a test keeps parameter ids and analyzer codes, so saved results and the analyzer stay attached', async () => {
   const cbc = await prisma.test.findFirst({ where: { code: 'HEM001' }, include: { parameters: { include: { refRanges: true } } } });
-  const edited = cbc.parameters.map(p => ({ ...p }));
+  const edited = cbc.parameters.map(({ shortName, formula, ...p }) => p); // the Tests Catalog form sends neither
   edited[0] = { ...edited[0], unit: 'g/dl (edited)', refRanges: [{ gender: 'MALE', normalMin: 13, normalMax: 17 }] };
   const saved = await q(tech, 'test', 'update', { where: { id: cbc.id }, data: { name: cbc.name, price: 400, parameters: edited } });
   const hb = saved.parameters.find(p => p.id === cbc.parameters[0].id);
   assert.ok(hb, 'parameter id preserved');
   assert.equal(hb.unit, 'g/dl (edited)');
+  assert.equal(hb.shortName, 'HGB', 'analyzer code kept');
 });
 
 // ---- Reports: frozen at approval ----
@@ -453,6 +454,14 @@ test('a dropdown reference range prints only when the lab ticks "Print reference
   const { build } = require('../lib/report-data');
   const rangeFor = extra => build({ orderNo: 'X', status: 'RESULT_ENTERED', patient: { age: 30, gender: 'MALE' }, items: [{ test: { name: 'Urine R/M', parameters: [{ id: 1, name: 'Color', type: 'DROPDOWN', sortOrder: 1, refRanges: [{ textNormal: 'Pale Yellow' }], ...extra }] }, results: [{ parameterId: 1, textValue: 'Yellow' }] }] }).data.tests[0].rows[0].range;
   assert.deepEqual([rangeFor({}), rangeFor({ printRefRange: true }), rangeFor({ type: 'TEXT' })], ['', 'Pale Yellow', 'Pale Yellow']);
+});
+
+test('"Leading zeros" prints 3 as 03 or 003 only when the lab picks it', () => {
+  const { build } = require('../lib/report-data');
+  const { padValue } = require('../lib/pad-value');
+  const valueFor = (padDigits, result) => build({ orderNo: 'X', status: 'RESULT_ENTERED', patient: { age: 30, gender: 'MALE' }, items: [{ test: { name: 'T', parameters: [{ id: 1, name: 'Eosinophils', type: 'NUMERIC', sortOrder: 1, padDigits }] }, results: [{ parameterId: 1, ...result }] }] }).data.tests[0].rows[0].value;
+  assert.deepEqual([valueFor(0, { numericValue: 3 }), valueFor(2, { numericValue: 3 }), valueFor(3, { numericValue: 3 }), valueFor(2, { numericValue: 45 })], ['3', '03', '003', '45']);
+  assert.deepEqual([padValue('3.5', 2), padValue('-3', 3), padValue('Nil', 2), padValue('', 2), padValue('1234', 3)], ['03.5', '-003', 'Nil', '', '1234']);
 });
 
 test('older data is upgraded on start-up: order prices filled in, analyzer orders reach Results and Reports', async () => {

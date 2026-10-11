@@ -147,6 +147,7 @@ model TestParameter {
   type            String    @default("NUMERIC") // ParameterType enum
   options         String?   // JSON array for dropdown type
   printRefRange   Boolean   @default(false) // dropdown type: print its reference range on the report
+  padDigits       Int       @default(0)     // leading zeros: 2 shows 3 as 03, 3 as 003; 0 = off
   formula         String?   // for calculated fields
   isHeader        Boolean   @default(false)  // section header row
   refRanges       ReferenceRange[]

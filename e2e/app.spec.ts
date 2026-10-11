@@ -143,6 +143,36 @@ test.describe.serial('a lab day on a fresh install', () => {
     expect(color).toMatchObject({ value: 'Dark Yellow', range: '' });
   });
 
+  test('Tests Catalog "Leading zeros": 3 is entered and printed as 03', async () => {
+    await go(page, '/tests');
+    await page.getByPlaceholder(/Search tests by name/).fill('Complete Blood Count');
+    await page.getByRole('row', { name: /Complete Blood Count/ }).first().getByRole('button').first().click();
+    await page.getByRole('button', { name: /2\. Parameters/ }).click();
+    const card = page.locator('div.bg-muted\\/5', { has: page.locator('input[value="Eosinophils"]') });
+    await card.locator('label', { hasText: 'Leading zeros' }).locator('select').selectOption('2');
+    await page.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page.getByRole('button', { name: 'Save Changes' })).toBeHidden();
+
+    await go(page, '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+    await page.keyboard.press('F2');
+    await page.getByPlaceholder('Enter full name').fill('Pooja Rani');
+    await page.getByPlaceholder('10-digit number').fill('9876500002');
+    await page.getByPlaceholder('Age').fill('34');
+    await page.getByRole('button', { name: 'CBC', exact: true }).click();
+    await page.getByRole('button', { name: 'Register & Enter Results' }).click();
+    const eos = page.locator('div.border-b', { has: page.getByText('Eosinophils', { exact: true }) }).last().getByPlaceholder('Enter result value');
+    await eos.fill('3');
+    await eos.press('Tab');
+    await expect(eos).toHaveValue('03');
+    await page.getByRole('button', { name: 'Save Results & Generate Report' }).click();
+    await expect(page.getByText(/registered successfully under order ID/)).toBeVisible();
+
+    const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: 'Pooja Rani' } }, include: { report: true } });
+    const row = JSON.parse(order.report.snapshot).tests[0].rows.find((r: any) => r.name === 'Eosinophils');
+    expect(row.value).toBe('03');
+  });
+
   test('Ctrl+K finds the patient and opens their record', async () => {
     await page.keyboard.press('Control+K');
     await page.getByRole('combobox').fill('Rajesh');

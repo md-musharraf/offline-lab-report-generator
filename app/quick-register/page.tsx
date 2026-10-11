@@ -6,6 +6,7 @@ import { nextNumber } from '@/lib/numbers';
 import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { can } from '@/lib/roles';
+import { padValue } from '@/lib/pad-value';
 import { postApi, todayInput } from '@/components/kit';
 import { downloadReportPdf, reportPdfUrl, ReportPreview } from '@/components/ReportPreview';
 import { AppLayout } from '@/components/AppLayout';
@@ -1762,6 +1763,7 @@ function QuickRegisterContent() {
                                           readOnly={isParamCalc && !isOverridden}
                                           value={resultState.value}
                                           onChange={(e) => handleResultValChange(param, e.target.value)}
+                                          onBlur={(e) => { const v = padValue(e.target.value, param.padDigits); if (!e.target.readOnly && v !== e.target.value) handleResultValChange(param, v); }}
                                           className={`w-full px-3 py-1.5 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${isParamCalc ? 'pr-14' : ''} ${inputBorderClass}`}
                                         />
                                         {isParamCalc && (

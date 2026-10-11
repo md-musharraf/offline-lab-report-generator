@@ -129,6 +129,7 @@ CREATE TABLE "TestParameter" (
     "type" TEXT NOT NULL DEFAULT 'NUMERIC',
     "options" TEXT,
     "printRefRange" BOOLEAN NOT NULL DEFAULT false,
+    "padDigits" INTEGER NOT NULL DEFAULT 0,
     "formula" TEXT,
     "isHeader" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

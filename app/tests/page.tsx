@@ -24,6 +24,7 @@ interface ParameterForm {
   type: 'NUMERIC' | 'TEXT' | 'DROPDOWN' | 'CALCULATED';
   options: string;
   printRefRange: boolean;
+  padDigits: number;
   isHeader: boolean;
   refRanges: RefRangeForm[];
 }
@@ -225,6 +226,7 @@ export default function TestsPage() {
             type: p.type || 'NUMERIC',
             options: p.options || '',
             printRefRange: !!p.printRefRange,
+            padDigits: p.padDigits || 0,
             isHeader: p.isHeader || false,
             refRanges: (p.refRanges || []).map((r: any) => ({
               id: r.id,
@@ -272,6 +274,7 @@ export default function TestsPage() {
       type: 'NUMERIC',
       options: '',
       printRefRange: false,
+      padDigits: 0,
       isHeader: false,
       refRanges: []
     };
@@ -362,6 +365,7 @@ export default function TestsPage() {
         type: p.type,
         options: p.options || null,
         printRefRange: p.printRefRange,
+        padDigits: p.padDigits,
         isHeader: p.isHeader,
         refRanges: p.refRanges.map(r => ({
           gender: r.gender,
@@ -622,6 +626,16 @@ export default function TestsPage() {
                               <input type="checkbox" checked={param.isHeader} onChange={e => updateParameterField(pIdx, 'isHeader', e.target.checked)} className="rounded border-border text-primary focus:ring-primary h-4 w-4" />
                               Is Section Header (e.g. "DIFFERENTIAL COUNT")
                             </label>
+                            {!param.isHeader && param.type !== 'DROPDOWN' && (
+                              <label className="flex items-center gap-2 text-xs font-bold text-foreground select-none">
+                                Leading zeros
+                                <select className="rounded-lg border border-border bg-background px-2 py-1 text-xs" value={param.padDigits} onChange={e => updateParameterField(pIdx, 'padDigits', Number(e.target.value))}>
+                                  <option value={0}>Off (3)</option>
+                                  <option value={2}>2 digits (03)</option>
+                                  <option value={3}>3 digits (003)</option>
+                                </select>
+                              </label>
+                            )}
                           </div>
 
                           {param.type === 'DROPDOWN' && !param.isHeader && (

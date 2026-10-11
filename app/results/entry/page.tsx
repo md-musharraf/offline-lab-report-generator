@@ -6,6 +6,7 @@ import { interpretResult } from '@/lib/result-interpreter';
 import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { AppLayout } from '@/components/AppLayout';
 import { can } from '@/lib/roles';
+import { padValue } from '@/lib/pad-value';
 import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -120,7 +121,7 @@ function ResultEntryContent() {
               }
 
               initialResults[r.parameterId] = {
-                value: r.textValue || (r.numericValue !== null ? String(r.numericValue) : ''),
+                value: padValue(r.textValue || (r.numericValue !== null ? String(r.numericValue) : ''), parameter?.padDigits),
                 statusObj
               };
             });
@@ -646,6 +647,7 @@ function ResultEntryContent() {
                                       className={`block w-full rounded-lg shadow-sm text-sm font-semibold border px-3 py-1.5 focus:outline-none focus:ring-2 ${isParamCalc ? 'pr-14' : ''} ${inputBorderClass} disabled:opacity-60 disabled:cursor-not-allowed`}
                                       value={resultEntry.value}
                                       onChange={(e) => handleInputChange(param, e.target.value)}
+                                      onBlur={(e) => { const v = padValue(e.target.value, param.padDigits); if (!e.target.readOnly && v !== e.target.value) handleInputChange(param, v); }}
                                     />
                                     {isParamCalc && !isReadOnly && (
                                       <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 select-none">
