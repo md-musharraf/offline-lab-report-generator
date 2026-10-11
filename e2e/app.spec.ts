@@ -15,6 +15,8 @@ const { encryptLicenseKey, getMachineId } = require('../lib/server-api');
 const OWNER = { name: 'Dr. Owner', email: 'owner@lab.com', password: 'Owner@123' };
 let recoveryCode = '';
 
+// '' while the PDF is missing or still locked by the app writing it (Windows EBUSY).
+const pdfHead = (file: string) => { try { return fs.readFileSync(file).subarray(0, 5).toString(); } catch { return ''; } };
 const go = (page: Page, route: string) => page.evaluate(r => (window as any).next.router.push(r), route);
 const dbQuery = (page: Page, model: string, action: string, args: any) =>
   page.evaluate(async q => {
@@ -119,8 +121,7 @@ test.describe.serial('a lab day on a fresh install', () => {
 
     await page.getByRole('button', { name: 'Download PDF Report' }).click();
     const pdf = path.join(dataDir, 'downloads', `${order.orderNo}-report.pdf`);
-    await expect.poll(() => fs.existsSync(pdf), { timeout: 20_000 }).toBe(true);
-    await expect.poll(() => fs.readFileSync(pdf).subarray(0, 5).toString()).toBe('%PDF-');
+    await expect.poll(() => pdfHead(pdf), { timeout: 20_000 }).toBe('%PDF-');
   });
 
   test('Quick Entry: dropdown parameters offer their choices; their range is not printed unless ticked', async () => {
@@ -233,7 +234,7 @@ test.describe.serial('a lab day on a fresh install', () => {
     const pdf = path.join(dataDir, 'downloads', `${rajesh.order.orderNo}-report.pdf`);
     fs.rmSync(pdf, { force: true });
     await row('Rajesh Kumar').getByRole('button', { name: 'Print' }).click();
-    await expect.poll(() => fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 5).toString(), { timeout: 20_000 }).toBe('%PDF-');
+    await expect.poll(() => pdfHead(pdf), { timeout: 20_000 }).toBe('%PDF-');
 
     // The next report carries the new address.
     await registerPatient(page, 'Kavita Singh', '30');
