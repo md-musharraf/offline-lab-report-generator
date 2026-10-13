@@ -7,11 +7,13 @@ import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { AppLayout } from '@/components/AppLayout';
 import { can } from '@/lib/roles';
 import { padValue } from '@/lib/pad-value';
-import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock } from 'lucide-react';
+import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { cn, getRoleAndPermissions } from '@/lib/utils';
+import { formatCurrency } from '@/shared/constants';
 import { AdminOverrideModal } from '@/components/AdminOverrideModal';
+import { postApi } from '@/components/kit';
 
 function ResultEntryContent() {
   const searchParams = useSearchParams();
@@ -45,6 +47,11 @@ function ResultEntryContent() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // A test ticked by mistake: confirm, then the outcome (new bill total / refund) stays on screen until OK.
+  const [removeItem, setRemoveItem] = useState<any>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removedMsg, setRemovedMsg] = useState<string | null>(null);
+  const canRemoveTest = !isReadOnly && can(currentUser?.role, 'billing') && items.length > 1;
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Form state maps parameterId to { value, statusObj }
@@ -412,6 +419,23 @@ function ResultEntryContent() {
     }
   };
 
+  const handleRemoveTest = async () => {
+    setRemoving(true);
+    try {
+      const res = await postApi('orders/remove-test', { itemId: removeItem.id });
+      setItems(prev => prev.filter(i => i.id !== removeItem.id));
+      if (order.status === 'APPROVED' || order.status === 'DELIVERED') setOrder({ ...order, status: 'RESULT_ENTERED' });
+      setRemovedMsg(`${removeItem.test?.name} removed.` +
+        (res.totalAmount != null ? ` New bill total ${formatCurrency(res.totalAmount)}${res.dueAmount > 0 ? `, due ${formatCurrency(res.dueAmount)}` : ''}.` : '') +
+        (res.refund > 0 ? ` Return ${formatCurrency(res.refund)} to the patient (recorded as a refund).` : ''));
+    } catch (err: any) {
+      setToast({ message: err.message || 'Could not remove the test', type: 'error' });
+      setRemoveItem(null);
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   if (loading) {
     return (
       <AppLayout title="Loading Results Entry..." breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Results', href: '/results' }]}>
@@ -528,8 +552,19 @@ function ResultEntryContent() {
         <div className="space-y-8">
           {items.map((item) => (
             <div key={item.id} className="bg-card rounded-xl border shadow-sm hover:shadow-md transition-shadow overflow-hidden border-border">
-              <div className="bg-muted/30 px-5 py-4 border-b border-border">
+              <div className="bg-muted/30 px-5 py-4 border-b border-border flex items-center justify-between gap-3">
                 <h3 className="text-lg font-bold text-foreground">{item.test?.name}</h3>
+                {canRemoveTest && (
+                  <button
+                    type="button"
+                    onClick={() => { setRemovedMsg(null); setRemoveItem(item); }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                    title="Remove this test from the order (added by mistake)"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove test
+                  </button>
+                )}
               </div>
               
               <div className="overflow-x-auto">
@@ -790,6 +825,46 @@ function ResultEntryContent() {
               >
                 Close History
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Test Modal */}
+      {removeItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !removing && setRemoveItem(null)}>
+          <div className="relative bg-card border rounded-xl p-6 w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center">
+                {removedMsg ? <CheckCircle className="h-5 w-5 text-green-600" /> : <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />}
+              </div>
+              <h2 className="text-lg font-semibold text-foreground">{removedMsg ? 'Test removed' : 'Remove test'}</h2>
+            </div>
+            {removedMsg ? (
+              <p className="text-sm text-foreground mb-5">{removedMsg}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground mb-5">
+                Remove <span className="font-semibold text-foreground">{removeItem.test?.name}</span> from this order?
+                Its results are deleted and {removeItem.price != null ? formatCurrency(removeItem.price) : 'its price'} comes off the bill.
+                If it was already paid, the extra is recorded as a refund.
+                {(order.status === 'APPROVED' || order.status === 'DELIVERED') && ' The approved report becomes a draft and must be approved again.'}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              {removedMsg ? (
+                <button onClick={() => { setRemoveItem(null); setRemovedMsg(null); }} className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-bold">
+                  OK
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => setRemoveItem(null)} disabled={removing} className="px-5 py-2.5 rounded-xl border text-sm font-bold hover:bg-accent transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={handleRemoveTest} disabled={removing} className="px-5 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                    {removing ? 'Removing...' : 'Remove'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

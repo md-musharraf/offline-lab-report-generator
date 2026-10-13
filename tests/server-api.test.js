@@ -406,6 +406,38 @@ test('nobody approves by writing the report row or plants a snapshot; approval n
   assert.match(res.json.error, /Enter the results/);
 });
 
+test('a test added by mistake comes off the order and the bill; money paid for it is booked as a refund', async () => {
+  const { cbc, hb } = await cbcWithHb();
+  const lft = await prisma.test.findFirst({ where: { id: { not: cbc.id } }, include: { parameters: true } });
+  const bill = await prisma.bill.create({ data: { billNo: 'RM-BILL-1', patientId: frozenPid, subtotal: 900, totalAmount: 900, paidAmount: 900, paymentStatus: 'PAID' } });
+  await prisma.payment.create({ data: { billId: bill.id, amount: 900, method: 'CASH', receivedBy: 1 } });
+  const order = await prisma.testOrder.create({
+    data: { orderNo: 'RM-ORD-1', patientId: frozenPid, billId: bill.id, status: 'RESULT_ENTERED', items: { create: [{ testId: cbc.id, price: 300 }, { testId: lft.id, price: 600 }] } },
+    include: { items: true },
+  });
+  const [cbcItem, lftItem] = order.items;
+  await prisma.testResult.create({ data: { orderItemId: cbcItem.id, parameterId: hb.id, numericValue: 14, status: 'NORMAL', enteredBy: 1 } });
+  await prisma.testResult.create({ data: { orderItemId: lftItem.id, parameterId: lft.parameters.find(p => !p.isHeader).id, numericValue: 1, status: 'NORMAL', enteredBy: 1 } });
+  await call(tech, 'POST', 'reports/approve', { orderId: order.id });
+
+  assert.match((await call(recep, 'POST', 'orders/remove-test', { itemId: lftItem.id })).json.error, /Receptionist is not allowed/, 'an approved report needs someone who may edit it');
+  const res = await call(tech, 'POST', 'orders/remove-test', { itemId: lftItem.id });
+  assert.equal(res.json.success, true, JSON.stringify(res.json));
+  assert.equal(res.json.refund, 600);
+
+  assert.equal(await prisma.testOrderItem.count({ where: { id: lftItem.id } }), 0);
+  assert.equal(await prisma.testResult.count({ where: { orderItemId: lftItem.id } }), 0);
+  assert.equal(await prisma.testResult.count({ where: { orderItemId: cbcItem.id } }), 1, 'the other test keeps its results');
+  assert.equal((await prisma.testOrder.findUnique({ where: { id: order.id } })).status, 'RESULT_ENTERED', 'report is a draft again');
+  const after = await prisma.bill.findUnique({ where: { id: bill.id }, include: { payments: true } });
+  assert.deepEqual([after.subtotal, after.totalAmount, after.paidAmount, after.dueAmount, after.paymentStatus], [300, 300, 300, 0, 'PAID']);
+  assert.equal(after.payments.reduce((s, p) => s + p.amount, 0), 300, 'collection totals drop by the refund');
+  assert.match((await prisma.activityLog.findFirst({ where: { action: 'Removed test from order' } })).details, /RM-ORD-1 .*₹900 → ₹300 · refund ₹600/);
+
+  const last = await call(tech, 'POST', 'orders/remove-test', { itemId: cbcItem.id });
+  assert.match(last.json.error, /only test/, 'the last test cannot be removed; delete the record instead');
+});
+
 test('report PDFs survive odd characters, long reports, letterhead paper and damaged images', async () => {
   const { renderReports } = require('../lib/report-pdf');
   const { PDFDocument } = require('pdf-lib');

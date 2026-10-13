@@ -232,6 +232,35 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect.poll(() => page.locator('input').evaluateAll(els => els.map(e => (e as HTMLInputElement).value)), { timeout: 15_000 }).toContain('9.1');
   });
 
+  test('Results: LFT ticked by mistake is removed from the order and comes off the bill', async () => {
+    await go(page, '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+    await page.keyboard.press('F2');
+    await page.getByPlaceholder('Enter full name').fill('Anil Oraon');
+    await page.getByPlaceholder('10-digit number').fill('9876500003');
+    await page.getByPlaceholder('Age').fill('50');
+    await page.getByRole('button', { name: 'CBC', exact: true }).click();
+    await page.getByRole('button', { name: 'LFT', exact: true }).click();
+    await page.getByRole('button', { name: 'Register & Enter Results' }).click();
+    await expect(page.getByPlaceholder('Enter result value').first()).toBeVisible();
+    const order = await dbQuery(page, 'testOrder', 'findFirst', { orderBy: { id: 'desc' }, include: { bill: true, items: { include: { test: true } } } });
+    const lft = order.items.find((i: any) => i.test.code === 'BIO001');
+    const cbc = order.items.find((i: any) => i.test.code === 'HEM001');
+
+    await go(page, `/results/entry?orderId=${order.id}`);
+    await page.locator('div', { has: page.getByRole('heading', { name: lft.test.name }) }).last().getByRole('button', { name: 'Remove test' }).click();
+    await page.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(page.getByText(/removed\. New bill total/)).toBeVisible();
+    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await expect(page.getByRole('heading', { name: lft.test.name })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Remove test' })).toHaveCount(0); // the last test stays
+
+    const after = await dbQuery(page, 'testOrder', 'findUnique', { where: { id: order.id }, include: { bill: true, items: true } });
+    expect(after.items.map((i: any) => i.id)).toEqual([cbc.id]);
+    expect(after.bill.subtotal).toBe(order.bill.subtotal - lft.price);
+    expect(after.bill.totalAmount).toBeLessThan(order.bill.totalAmount);
+  });
+
   test('reports: approved reports keep the lab details they were approved with; new reports get the new ones', async () => {
     const reportOf = async (patientName: string) => {
       const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: patientName } }, orderBy: { id: 'desc' }, include: { report: true } });
