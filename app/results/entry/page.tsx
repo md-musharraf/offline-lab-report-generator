@@ -334,7 +334,8 @@ function ResultEntryContent() {
           
           const isNumeric = param.type === 'NUMERIC' || param.type === 'CALCULATED';
           const numericValue = isNumeric && !isNaN(Number(resultEntry.value)) ? Number(resultEntry.value) : null;
-          const textValue = !isNumeric ? resultEntry.value : null;
+          // Keep what the technician typed ("03", "10.00") so the report prints it as-is; numericValue drives flags.
+          const textValue = String(resultEntry.value).trim();
 
           // Compute Delta Check on manual entry
           let deltaCheckNote = null;
@@ -797,7 +798,7 @@ function ResultEntryContent() {
                     <div key={h.id} className="flex justify-between items-center text-sm border-b border-border/40 pb-2 last:border-0 last:pb-0">
                       <div>
                         <p className="font-semibold text-foreground">
-                          {h.numericValue !== null ? h.numericValue : h.textValue} <span className="text-xs text-muted-foreground font-mono">{h.unit || ''}</span>
+                          {h.textValue || h.numericValue} <span className="text-xs text-muted-foreground font-mono">{h.unit || ''}</span>
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Order: <span className="font-mono font-medium">{h.orderItem?.order?.orderNo || '—'}</span>

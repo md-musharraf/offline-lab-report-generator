@@ -108,7 +108,7 @@ test.describe.serial('a lab day on a fresh install', () => {
     expect(order.patient.name).toBe('Rajesh Kumar');
 
     const inputs = page.locator('input[placeholder="Enter result value"]:not([readonly])');
-    await inputs.nth(0).fill('10.2'); // Hb, below 13-17
+    await inputs.nth(0).fill('10.20'); // Hb, below 13-17; trailing zero must survive to the report
     await inputs.nth(1).fill('4.8');
     await inputs.nth(2).fill('42');
     await page.getByRole('button', { name: 'Save Results & Generate Report' }).click();
@@ -118,6 +118,7 @@ test.describe.serial('a lab day on a fresh install', () => {
     const hb = results.find((r: any) => r.numericValue === 10.2);
     expect(hb, 'Hb saved').toBeTruthy();
     expect(hb.isAbnormal).toBe(true);
+    expect(hb.textValue, 'typed text kept for the report').toBe('10.20');
 
     await page.getByRole('button', { name: 'Download PDF Report' }).click();
     const pdf = path.join(dataDir, 'downloads', `${order.orderNo}-report.pdf`);

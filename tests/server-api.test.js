@@ -493,6 +493,8 @@ test('"Leading zeros" prints 3 as 03 or 003 only when the lab picks it', () => {
   const { padValue } = require('../lib/pad-value');
   const valueFor = (padDigits, result) => build({ orderNo: 'X', status: 'RESULT_ENTERED', patient: { age: 30, gender: 'MALE' }, items: [{ test: { name: 'T', parameters: [{ id: 1, name: 'Eosinophils', type: 'NUMERIC', sortOrder: 1, padDigits }] }, results: [{ parameterId: 1, ...result }] }] }).data.tests[0].rows[0].value;
   assert.deepEqual([valueFor(0, { numericValue: 3 }), valueFor(2, { numericValue: 3 }), valueFor(3, { numericValue: 3 }), valueFor(2, { numericValue: 45 })], ['3', '03', '003', '45']);
+  // What the technician typed prints as-is: no zeros added or stripped.
+  assert.deepEqual(['03', '003', '10.00', '10.30', '10.0'].map(t => valueFor(0, { numericValue: Number(t), textValue: t })), ['03', '003', '10.00', '10.30', '10.0']);
   assert.deepEqual([padValue('3.5', 2), padValue('-3', 3), padValue('Nil', 2), padValue('', 2), padValue('1234', 3)], ['03.5', '-003', 'Nil', '', '1234']);
 });
 

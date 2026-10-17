@@ -893,7 +893,8 @@ function QuickRegisterContent() {
           hasEnteredResults = true;
           const isNumeric = param.type === 'NUMERIC' || param.type === 'CALCULATED';
           const numericValue = isNumeric && !isNaN(Number(paramResult.value)) ? Number(paramResult.value) : null;
-          const textValue = !isNumeric ? paramResult.value : null;
+          // Keep what the technician typed ("03", "10.00") so the report prints it as-is; numericValue drives flags.
+          const textValue = String(paramResult.value).trim();
 
           await db.query('testResult', 'create', {
             data: {
