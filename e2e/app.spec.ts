@@ -103,6 +103,32 @@ test.describe.serial('a lab day on a fresh install', () => {
     await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
   });
 
+  test('owner changes the password from the user menu: wrong current one refused, new one signs in', async () => {
+    const openDialog = async () => {
+      await page.getByRole('button', { name: new RegExp(OWNER.name) }).click();
+      await page.getByRole('menuitem', { name: 'Change password' }).click();
+    };
+    const dialog = page.getByRole('dialog', { name: 'Change password' });
+    await openDialog();
+    await dialog.getByLabel('Current password').fill('not-my-password');
+    await dialog.getByLabel('New password', { exact: true }).fill('Owner@789');
+    await dialog.getByLabel('Confirm new password').fill('Owner@789');
+    await dialog.getByRole('button', { name: 'Change password' }).click();
+    await expect(dialog.getByRole('alert')).toHaveText('Current password is wrong');
+    await dialog.getByLabel('Current password').fill(OWNER.password);
+    await dialog.getByRole('button', { name: 'Change password' }).click();
+    await expect(page.getByText('Password changed.', { exact: false })).toBeVisible();
+    await expect(dialog).toBeHidden();
+    OWNER.password = 'Owner@789';
+
+    await page.getByRole('button', { name: new RegExp(OWNER.name) }).click();
+    await page.getByRole('menuitem', { name: 'Sign out' }).click();
+    await signIn(page, 'Owner@456');
+    await expect(page.getByRole('alert').filter({ hasText: /Invalid/i })).toBeVisible();
+    await signIn(page);
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  });
+
   test('walk-in: register + bill, enter results, report PDF downloads', async () => {
     const order = await registerPatient(page, 'Rajesh Kumar', '45');
     expect(order.patient.name).toBe('Rajesh Kumar');

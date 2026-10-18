@@ -580,6 +580,23 @@ test('owner who forgot the password resets it with the one-time recovery code; n
   assert.equal((await recover(fresh.json.recoveryCode, 'Secret@123')).json.success, true);
 });
 
+test('owner and staff change their own password, only with the current one', async () => {
+  const anon = { prisma, dataDir: tmp, session: null };
+  const change = (ctx, currentPassword, newPassword) => call(ctx, 'POST', 'auth/change-password', { currentPassword, newPassword });
+  assert.equal((await change(anon, 'Secret@123', 'Mine@1234')).status, 403, 'not without signing in');
+  assert.equal((await change(owner, 'wrong', 'Mine@1234')).status, 401);
+  assert.equal((await change(owner, 'Secret@123', '123')).status, 400, 'at least 6 characters');
+  assert.equal((await change(owner, 'Secret@123', 'Mine@1234')).json.success, true);
+  assert.equal((await call(anon, 'POST', 'auth/login', { email: 'owner@lab.test', password: 'Secret@123' })).status, 401, 'old password is dead');
+  await signIn('owner@lab.test', 'Mine@1234');
+
+  assert.equal((await change(tech, 'Asha@123', 'Asha@456')).json.success, true, 'staff too');
+  await signIn('asha@lab.test', 'Asha@456');
+  await change(tech, 'Asha@456', 'Asha@123'); // the next test signs in with this
+  const log = await q(owner, 'activityLog', 'findMany', { where: { action: 'Changed own password' } });
+  assert.equal(log.length, 3);
+});
+
 test('sign-out ends the session; five wrong passwords lock sign-in for a minute', async () => {
   await call(tech, 'POST', 'auth/logout');
   await denied(q(tech, 'patient', 'findMany', {}));

@@ -3,11 +3,11 @@ import { Sidebar } from '@/components/Sidebar';
 import { CommandPalette } from '@/components/CommandPalette';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Moon, Sun, LogOut, ChevronRight, WifiOff, Send, ShieldAlert } from 'lucide-react';
+import { Search, Moon, Sun, LogOut, ChevronRight, WifiOff, Send, ShieldAlert, KeyRound } from 'lucide-react';
 import { useEnterAsTab } from '@/lib/useEnterAsTab';
 import { useRouter, usePathname } from 'next/navigation';
 import { can, canOpen, roleLabel } from '@/lib/roles';
-import { postApi } from '@/components/kit';
+import { postApi, Modal, Field, inputCls, btnPrimary, btnGhost, useToast, ToastView } from '@/components/kit';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -53,10 +53,54 @@ const readOutbox = (): any[] => {
   }
 };
 
+// Whoever is signed in changes their own password; the current one is asked so a session left open cannot.
+function ChangePasswordModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (next.length < 6) return setError('New password must be at least 6 characters');
+    if (next !== confirm) return setError('The new passwords do not match');
+    setSaving(true);
+    setError('');
+    try {
+      await postApi('auth/change-password', { currentPassword: current, newPassword: next });
+      onDone();
+    } catch (err: any) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  const input = (value: string, set: (v: string) => void, autoComplete: string, autoFocus = false) => (
+    <input type="password" autoFocus={autoFocus} autoComplete={autoComplete} value={value} onChange={e => set(e.target.value)} className={`${inputCls} h-10`} />
+  );
+  return (
+    <Modal title="Change password" onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="Current password">{input(current, setCurrent, 'current-password', true)}</Field>
+        <Field label="New password">{input(next, setNext, 'new-password')}</Field>
+        <Field label="Confirm new password">{input(confirm, setConfirm, 'new-password')}</Field>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className={btnGhost}>Cancel</button>
+          <button type="submit" disabled={saving || !current || !next || !confirm} className={btnPrimary}>{saving ? 'Saving…' : 'Change password'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
   const [darkMode, setDarkMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [toast, showToast] = useToast();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
@@ -272,8 +316,15 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
                     </div>
                     <button
                       role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); setChangingPassword(true); }}
+                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent"
+                    >
+                      <KeyRound className="h-4 w-4" /> Change password
+                    </button>
+                    <button
+                      role="menuitem"
                       onClick={logout}
-                      className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
                     >
                       <LogOut className="h-4 w-4" /> Sign out
                     </button>
@@ -309,6 +360,13 @@ export function AppLayout({ children, title, breadcrumbs }: AppLayoutProps) {
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} role={currentUser.role} />
+      {changingPassword && (
+        <ChangePasswordModal
+          onClose={() => setChangingPassword(false)}
+          onDone={() => { setChangingPassword(false); showToast('Password changed. Use the new one next time you sign in.'); }}
+        />
+      )}
+      <ToastView toast={toast} />
     </div>
   );
 }
