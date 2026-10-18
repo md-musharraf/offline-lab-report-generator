@@ -73,7 +73,8 @@ for (const file of fs.readdirSync(schemas).filter(f => f.endsWith('.sql'))) {
     const { backup } = await api.upgradeDatabase(db, sql, { dataDir, version });
     assert.ok(backup && fs.existsSync(backup), 'an untouched copy is saved before the update');
     assert.deepEqual(await counts(open(backup)), before, 'the copy holds everything');
-    assert.deepEqual(await counts(db), before, 'nothing lost or added by the update');
+    assert.deepEqual(await counts(db), { ...before, Test: before.Test + 1 }, 'nothing lost; the update only adds KFT');
+    assert.equal((await db.test.findUnique({ where: { code: 'BIO079' } })).name, 'Kidney Function Test');
 
     assert.equal((await login(db, dataDir, 'Owner@Old.lab ', 'Old@123')).json.success, true, 'owner signs in as before');
     assert.equal((await login(db, dataDir, 'tech@old.lab', 'Plain@123')).json.success, true, 'old plain-text password still works');
@@ -90,41 +91,76 @@ for (const file of fs.readdirSync(schemas).filter(f => f.endsWith('.sql'))) {
   });
 }
 
-test('a lab updating to 1.10.0 gets KFT once: a copy of its own RFT without Sodium, Potassium and Chloride', async () => {
-  const dataDir = path.join(tmp, 'kft');
+// KFT (BIO079) = RFT without Sodium, Potassium and Chloride, added on the update. Catalog Delete sets isActive false.
+async function kftLab(name, userVersion, setup) {
+  const dataDir = path.join(tmp, `kft-${name}`);
   fs.mkdirSync(dataDir);
   const db = open(path.join(dataDir, 'dev.db'));
   await api.ensureSchema(db, sql);
-  await db.$executeRawUnsafe('PRAGMA user_version = 10901'); // last used by v1.9.1
-  const cat = await db.testCategory.create({ data: { name: 'Biochemistry' } });
-  const p = (name, sortOrder, extra = {}) => ({ name, sortOrder, unit: 'mg/dL', ...extra });
-  await db.test.create({
-    data: {
-      code: 'BIO002', name: 'Renal Function Test', shortName: 'RFT', categoryId: cat.id, price: 720, duration: 4, sampleType: 'Serum',
-      parameters: {
-        create: [
-          p('Blood Urea Nitrogen (BUN)', 1, { shortName: 'BUN', refRanges: { create: [{ normalMin: 7, normalMax: 21 }] } }),
-          p('Blood Urea', 2), p('Serum Creatinine', 3), p('Sodium (Na+)', 4), p('Potassium (K+)', 5), p('Chloride (Cl-)', 6),
-          p('eGFR (Estimated GFR)', 7, { refRanges: { create: [{ gender: 'MALE', normalMin: 90 }, { gender: 'FEMALE', normalMin: 85 }] } }),
-        ],
-      },
-    },
-  });
+  await db.$executeRawUnsafe(`PRAGMA user_version = ${userVersion}`);
+  const { id: categoryId } = await db.testCategory.create({ data: { name: 'Biochemistry' } });
+  const addTest = (code, name, extra = {}) => db.test.create({ data: { code, name, categoryId, price: 100, duration: 1, sampleType: 'Serum', ...extra } });
+  await setup(addTest, db);
+  await api.upgradeDatabase(db, sql, { dataDir, version: '1.10.1' });
   const include = { parameters: { include: { refRanges: true }, orderBy: { sortOrder: 'asc' } } };
+  return { db, dataDir, categoryId, kft: () => db.test.findUnique({ where: { code: 'BIO079' }, include }), rft: () => db.test.findUnique({ where: { code: 'BIO002' }, include }) };
+}
+const p = (name, sortOrder, extra = {}) => ({ name, sortOrder, unit: 'mg/dL', ...extra });
+const RFT = {
+  shortName: 'RFT', price: 720, duration: 4,
+  parameters: {
+    create: [
+      p('Blood Urea Nitrogen (BUN)', 1, { shortName: 'BUN', refRanges: { create: [{ normalMin: 7, normalMax: 21 }] } }),
+      p('Blood Urea', 2), p('Serum Creatinine', 3), p('Sodium (Na+)', 4), p('Potassium (K+)', 5), p('Chloride (Cl-)', 6),
+      p('eGFR (Estimated GFR)', 7, { refRanges: { create: [{ gender: 'MALE', normalMin: 90 }, { gender: 'FEMALE', normalMin: 85 }] } }),
+    ],
+  },
+};
 
-  await api.upgradeDatabase(db, sql, { dataDir, version: '1.10.0' });
-  const kft = await db.test.findUnique({ where: { code: 'BIO079' }, include });
-  assert.deepEqual([kft.name, kft.shortName, kft.price, kft.duration, kft.sampleType, kft.categoryId], ['Kidney Function Test', 'KFT', 720, 4, 'Serum', cat.id]);
+test('KFT: a copy of the lab\'s own RFT, even when other tests merely mention KFT or a deleted one is named KFT', async () => {
+  const lab = await kftLab('copy', 10901, async (addTest) => { // last used by v1.9.1
+    await addTest('BIO002', 'Renal Function Test', RFT);
+    await addTest('PKG01', 'LFT + KFT', { shortName: 'LFT/KFT' });
+    await addTest('OLD01', 'KFT', { isActive: false });
+  });
+  const kft = await lab.kft();
+  assert.deepEqual([kft.name, kft.shortName, kft.price, kft.duration, kft.isActive, kft.categoryId], ['Kidney Function Test', 'KFT', 720, 4, true, lab.categoryId]);
   assert.deepEqual(kft.parameters.map(x => `${x.sortOrder}.${x.name}`), ['1.Blood Urea Nitrogen (BUN)', '2.Blood Urea', '3.Serum Creatinine', '4.eGFR (Estimated GFR)']);
   assert.deepEqual([kft.parameters[0].shortName, kft.parameters[0].refRanges[0].normalMax], ['BUN', 21], 'analyzer code and ranges copied');
   assert.equal(kft.parameters[3].refRanges.length, 2);
-  assert.equal((await db.test.findUnique({ where: { code: 'BIO002' }, include })).parameters.length, 7, 'RFT keeps its electrolytes');
+  assert.equal((await lab.rft()).parameters.length, 7, 'RFT keeps its electrolytes');
 
-  await db.referenceRange.deleteMany({ where: { parameter: { testId: kft.id } } });
-  await db.testParameter.deleteMany({ where: { testId: kft.id } });
-  await db.test.delete({ where: { id: kft.id } });
-  await api.upgradeDatabase(db, sql, { dataDir, version: '1.10.1' });
-  assert.equal(await db.test.count({ where: { code: 'BIO079' } }), 0, 'a lab that deleted KFT does not get it back');
+  await lab.db.test.update({ where: { id: kft.id }, data: { isActive: false } }); // the lab deletes KFT
+  await api.upgradeDatabase(lab.db, sql, { dataDir: lab.dataDir, version: '1.10.2' });
+  assert.equal((await lab.kft()).isActive, false, 'a KFT the lab deleted stays deleted');
+});
+
+test('KFT: a lab with its own KFT gets no second one', async () => {
+  const lab = await kftLab('own', 10901, addTest => addTest('BIO002', 'Renal Function Test', RFT).then(() => addTest('K1', 'Kidney Function Test (KFT)')));
+  assert.equal(await lab.kft(), null);
+});
+
+test('KFT: a deleted RFT gives a visible KFT; no RFT at all gives the default panel', async () => {
+  const hidden = await kftLab('rft-deleted', 10901, addTest => addTest('BIO002', 'Renal Function Test', { ...RFT, isActive: false }));
+  assert.equal((await hidden.kft()).isActive, true);
+  assert.equal((await hidden.rft()).isActive, false, 'RFT stays deleted');
+
+  const none = await kftLab('no-rft', 10901, addTest => addTest('R9', 'Renal Profile'));
+  const kft = await none.kft();
+  assert.deepEqual([kft.isActive, kft.categoryId, kft.sampleType], [true, none.categoryId, 'Serum']);
+  assert.equal(kft.parameters.length, 9);
+  assert.ok(!kft.parameters.some(x => /sodium|potassium|chloride/i.test(x.name)));
+});
+
+test('KFT: 1.10.0\'s hidden copy of a deleted RFT is shown by 1.10.1; a KFT the lab deleted is not', async () => {
+  const copy = await kftLab('hidden-copy', 11000, addTest => addTest('BIO079', 'Kidney Function Test', { isActive: false }));
+  assert.equal((await copy.kft()).isActive, true);
+
+  const deleted = await kftLab('lab-deleted', 11000, async (addTest, db) => {
+    const { id } = await addTest('BIO079', 'Kidney Function Test', { createdAt: new Date(Date.now() - 3600e3) });
+    await db.test.update({ where: { id }, data: { isActive: false } });
+  });
+  assert.equal((await deleted.kft()).isActive, false);
 });
 
 test('a missing database comes back from the newest backup or an older install, never as an empty lab', () => {
