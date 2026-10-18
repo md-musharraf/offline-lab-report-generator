@@ -336,8 +336,7 @@ test.describe.serial('a lab day on a fresh install', () => {
     await esr.getByPlaceholder('Enter result...').fill('18');
     await page.getByRole('button', { name: 'Save Results' }).click();
     await expect(page.getByText('Results saved successfully!')).toBeVisible();
-    // Saving moves to the Results list 1.5 s later; wait for it, or it lands in the middle of the next test.
-    await expect(page.getByRole('button', { name: 'Save Results' })).toBeHidden({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Results Entry Dashboard' })).toBeVisible({ timeout: 15_000 }); // moves to the list
 
     const after = await dbQuery(page, 'testOrder', 'findUnique', { where: { id: order.id }, include: { bill: true, items: { include: { test: true, results: true } } } });
     expect(after.items.map((i: any) => i.test.code)).toEqual(['HEM001', 'HEM005']);

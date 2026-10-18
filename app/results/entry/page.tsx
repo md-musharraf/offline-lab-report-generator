@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/db';
 import { interpretResult } from '@/lib/result-interpreter';
@@ -182,6 +182,10 @@ function ResultEntryContent() {
     }
     if (orderId) loadOrder();
   }, [orderId]);
+
+  // After saving, the screen moves to the Results list; never if the user has left for another screen already.
+  const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(leaveTimer.current), []);
 
   // Dismiss toast after timeout
   useEffect(() => {
@@ -417,8 +421,8 @@ function ResultEntryContent() {
 
       setToast({ message: "Results saved successfully!", type: "success" });
       
-      // Delay redirect to show success toast
-      setTimeout(() => {
+      // Delay redirect to show success toast (cancelled if the user has already gone to another screen)
+      leaveTimer.current = setTimeout(() => {
         router.push('/results');
       }, 1500);
     } catch (error) {
