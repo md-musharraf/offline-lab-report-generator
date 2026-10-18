@@ -7,13 +7,13 @@ import { evaluateTestFormulas, isCalculated } from '@/lib/formula-evaluator';
 import { AppLayout } from '@/components/AppLayout';
 import { can } from '@/lib/roles';
 import { padValue } from '@/lib/pad-value';
-import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, AlertCircle, CheckCircle, XCircle, X, Lock, Trash2, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { cn, getRoleAndPermissions } from '@/lib/utils';
 import { formatCurrency } from '@/shared/constants';
 import { AdminOverrideModal } from '@/components/AdminOverrideModal';
-import { postApi } from '@/components/kit';
+import { postApi, Modal, inputCls, btnPrimary, btnGhost } from '@/components/kit';
 
 function ResultEntryContent() {
   const searchParams = useSearchParams();
@@ -52,6 +52,14 @@ function ResultEntryContent() {
   const [removing, setRemoving] = useState(false);
   const [removedMsg, setRemovedMsg] = useState<string | null>(null);
   const canRemoveTest = !isReadOnly && can(currentUser?.role, 'billing') && items.length > 1;
+  // A test the doctor asked for later: picked from the catalog, it joins this order and its bill.
+  const canAddTest = !isReadOnly && can(currentUser?.role, 'billing');
+  const [addOpen, setAddOpen] = useState(false);
+  const [catalog, setCatalog] = useState<any[]>([]);
+  const [testSearch, setTestSearch] = useState('');
+  const [pickedTest, setPickedTest] = useState<any>(null);
+  const [adding, setAdding] = useState(false);
+  const [addedMsg, setAddedMsg] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Form state maps parameterId to { value, statusObj }
@@ -437,6 +445,46 @@ function ResultEntryContent() {
     }
   };
 
+  const openAddTest = async () => {
+    setPickedTest(null);
+    setTestSearch('');
+    setAddedMsg(null);
+    setAddOpen(true);
+    if (!catalog.length) {
+      try {
+        setCatalog(await db.query('test', 'findMany', { where: { isActive: true }, select: { id: true, name: true, shortName: true, code: true, price: true }, orderBy: { name: 'asc' } }));
+      } catch {
+        setToast({ message: 'Could not load the test catalog', type: 'error' });
+      }
+    }
+  };
+
+  // Results typed but not saved yet stay on screen: the new test is appended, nothing is reloaded.
+  const handleAddTest = async () => {
+    setAdding(true);
+    try {
+      const res = await postApi('orders/add-test', { orderId: order.id, testId: pickedTest.id });
+      const item = await db.query('testOrderItem', 'findUnique', {
+        where: { id: res.itemId },
+        include: { test: { include: { parameters: { include: { refRanges: true } } } }, results: true },
+      });
+      setItems(prev => [...prev, item]);
+      if (order.status === 'APPROVED' || order.status === 'DELIVERED') setOrder({ ...order, status: 'RESULT_ENTERED' });
+      setAddedMsg(`${pickedTest.name} added to this order.` +
+        (res.totalAmount != null ? ` New bill total ${formatCurrency(res.totalAmount)}${res.dueAmount > 0 ? `, due ${formatCurrency(res.dueAmount)}` : ''}.` : ''));
+    } catch (err: any) {
+      setToast({ message: err.message || 'Could not add the test', type: 'error' });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const onOrder = new Set(items.map(i => i.testId));
+  const q = testSearch.trim().toLowerCase();
+  const testMatches = catalog
+    .filter(t => !onOrder.has(t.id) && (!q || [t.name, t.shortName, t.code].some(s => s?.toLowerCase().includes(q))))
+    .slice(0, 30);
+
   if (loading) {
     return (
       <AppLayout title="Loading Results Entry..." breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Results', href: '/results' }]}>
@@ -476,8 +524,20 @@ function ResultEntryContent() {
             <ArrowLeft className="h-4 w-4" />
             Back to Results
           </Link>
+          <div className="ml-auto flex items-center gap-2">
+          {canAddTest && (
+            <button
+              type="button"
+              onClick={openAddTest}
+              title="Add a test the doctor asked for later to this order and its bill"
+              className="inline-flex items-center gap-2 rounded-xl border bg-card px-4 py-2.5 text-sm font-bold text-foreground hover:bg-accent transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add test
+            </button>
+          )}
           {!isReadOnly && (
-            <button 
+            <button
               onClick={handleSave}
               disabled={saving}
               className="btn-primary-glow inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors shadow-md disabled:opacity-50"
@@ -486,6 +546,7 @@ function ResultEntryContent() {
               {saving ? 'Saving...' : 'Save Results'}
             </button>
           )}
+          </div>
         </div>
 
         {/* Approved Results Lock Banner */}
@@ -869,6 +930,60 @@ function ResultEntryContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Add Test Modal */}
+      {addOpen && (
+        <Modal title={addedMsg ? 'Test added' : 'Add test to this order'} onClose={() => !adding && setAddOpen(false)}>
+          {addedMsg ? (
+            <>
+              <p className="text-sm text-foreground">{addedMsg} Enter its results below and save.</p>
+              <div className="mt-6 flex justify-end">
+                <button type="button" onClick={() => setAddOpen(false)} className={btnPrimary}>OK</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <input
+                autoFocus
+                value={testSearch}
+                onChange={e => { setTestSearch(e.target.value); setPickedTest(null); }}
+                placeholder="Search test by name or code"
+                className={`${inputCls} h-10`}
+              />
+              <div role="listbox" aria-label="Tests" className="mt-3 max-h-72 overflow-y-auto rounded-lg border divide-y">
+                {testMatches.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-sm text-muted-foreground">{catalog.length ? 'No matching test, or it is already on this order.' : 'Loading tests…'}</p>
+                ) : testMatches.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="option"
+                    aria-selected={pickedTest?.id === t.id}
+                    onClick={() => setPickedTest(t)}
+                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors ${pickedTest?.id === t.id ? 'bg-primary/10 font-semibold text-primary' : 'hover:bg-accent'}`}
+                  >
+                    <span className="min-w-0 truncate">{t.name}{t.shortName ? <span className="ml-2 text-xs text-muted-foreground">{t.shortName}</span> : null}</span>
+                    <span className="shrink-0 font-mono text-xs">{formatCurrency(t.price)}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {pickedTest
+                  ? `${pickedTest.name} (${formatCurrency(pickedTest.price)}) joins this order and its bill, with the bill's discount and GST. The patient pays the difference at the counter.`
+                  : 'Pick the test the doctor asked for. It goes on this order and its bill, not a new one.'}
+                {(order.status === 'APPROVED' || order.status === 'DELIVERED') && ' The approved report becomes a draft and must be approved again.'}
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button type="button" onClick={() => setAddOpen(false)} disabled={adding} className={btnGhost}>Cancel</button>
+                <button type="button" onClick={handleAddTest} disabled={!pickedTest || adding} className={btnPrimary}>
+                  <Plus className="h-4 w-4" />
+                  {adding ? 'Adding...' : 'Add to order'}
+                </button>
+              </div>
+            </>
+          )}
+        </Modal>
       )}
 
       {/* Admin Override Modal */}

@@ -438,6 +438,37 @@ test('a test added by mistake comes off the order and the bill; money paid for i
   assert.match(last.json.error, /only test/, 'the last test cannot be removed; delete the record instead');
 });
 
+test('a test the doctor asks for later joins the same order and bill; the patient owes the difference', async () => {
+  const { cbc, hb } = await cbcWithHb();
+  const esr = await prisma.test.findUnique({ where: { code: 'HEM005' } });
+  const bill = await prisma.bill.create({ data: { billNo: 'ADD-BILL-1', patientId: frozenPid, subtotal: 300, discountType: 'PERCENTAGE', discountValue: 10, discountAmount: 30, totalAmount: 270, paidAmount: 270, paymentStatus: 'PAID' } });
+  const order = await prisma.testOrder.create({
+    data: { orderNo: 'ADD-ORD-1', patientId: frozenPid, billId: bill.id, status: 'RESULT_ENTERED', items: { create: [{ testId: cbc.id, price: 300 }] } },
+    include: { items: true },
+  });
+  await prisma.testResult.create({ data: { orderItemId: order.items[0].id, parameterId: hb.id, numericValue: 14, status: 'NORMAL', enteredBy: 1 } });
+  await call(tech, 'POST', 'reports/approve', { orderId: order.id });
+  const add = testId => call(tech, 'POST', 'orders/add-test', { orderId: order.id, testId });
+
+  assert.match((await call(recep, 'POST', 'orders/add-test', { orderId: order.id, testId: esr.id })).json.error, /Receptionist is not allowed/, 'an approved report needs someone who may edit it');
+  const res = await add(esr.id);
+  assert.equal(res.json.success, true, JSON.stringify(res.json));
+  const total = Math.round(0.9 * (300 + esr.price) * 100) / 100;
+  assert.deepEqual([res.json.totalAmount, res.json.dueAmount], [total, Math.round((total - 270) * 100) / 100]);
+
+  const after = await prisma.testOrder.findUnique({ where: { id: order.id }, include: { bill: true, items: { include: { results: true } } } });
+  assert.deepEqual(after.items.map(i => [i.testId, i.price, i.results.length]), [[cbc.id, 300, 1], [esr.id, esr.price, 0]], 'CBC keeps its results');
+  assert.equal(after.status, 'RESULT_ENTERED', 'report is a draft again');
+  assert.deepEqual([after.bill.subtotal, after.bill.discountAmount, after.bill.totalAmount, after.bill.paidAmount, after.bill.paymentStatus],
+    [300 + esr.price, Math.round(0.1 * (300 + esr.price) * 100) / 100, total, 270, 'PARTIAL']);
+  assert.match((await prisma.activityLog.findFirst({ where: { action: 'Added test to order' } })).details, /ESR|Erythrocyte/i);
+
+  assert.match((await add(esr.id)).json.error, /already on this order/);
+  const deleted = await prisma.test.update({ where: { code: 'HEM006' }, data: { isActive: false } }); // catalog Delete
+  assert.match((await add(deleted.id)).json.error, /not in the catalog/);
+  await prisma.test.update({ where: { id: deleted.id }, data: { isActive: true } });
+});
+
 test('report PDFs survive odd characters, long reports, letterhead paper and damaged images', async () => {
   const { renderReports } = require('../lib/report-pdf');
   const { PDFDocument } = require('pdf-lib');

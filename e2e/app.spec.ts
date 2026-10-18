@@ -314,6 +314,37 @@ test.describe.serial('a lab day on a fresh install', () => {
     expect(after.bill.totalAmount).toBeLessThan(order.bill.totalAmount);
   });
 
+  test('Results: a test the doctor asks for later joins the same order and bill; typed results stay', async () => {
+    await go(page, '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+    const order = await registerPatient(page, 'Bimla Tudu', '38');
+    const before = await dbQuery(page, 'testOrder', 'findUnique', { where: { id: order.id }, include: { bill: true } });
+
+    await go(page, `/results/entry?orderId=${order.id}`);
+    const hb = page.getByPlaceholder('Enter result...').first();
+    await hb.fill('12.5'); // typed, not saved yet
+    await page.getByRole('button', { name: 'Add test' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add test to this order' });
+    await dialog.getByPlaceholder('Search test by name or code').fill('HEM005');
+    await dialog.getByRole('option', { name: /Erythrocyte Sedimentation Rate/ }).click();
+    await dialog.getByRole('button', { name: 'Add to order' }).click();
+    await expect(page.getByText(/Erythrocyte Sedimentation Rate added to this order\. New bill total/)).toBeVisible();
+    await page.getByRole('button', { name: 'OK', exact: true }).click();
+
+    await expect(hb).toHaveValue('12.5');
+    const esr = page.locator('div.bg-card', { has: page.getByRole('heading', { name: 'Erythrocyte Sedimentation Rate' }) }); // the whole test card
+    await esr.getByPlaceholder('Enter result...').fill('18');
+    await page.getByRole('button', { name: 'Save Results' }).click();
+    await expect(page.getByText('Results saved successfully!')).toBeVisible();
+
+    const after = await dbQuery(page, 'testOrder', 'findUnique', { where: { id: order.id }, include: { bill: true, items: { include: { test: true, results: true } } } });
+    expect(after.items.map((i: any) => i.test.code)).toEqual(['HEM001', 'HEM005']);
+    expect(after.items.every((i: any) => i.results.length > 0), 'both tests saved their results').toBe(true);
+    expect(after.bill.id).toBe(before.bill.id);
+    expect(after.bill.subtotal).toBe(before.bill.subtotal + 150);
+    expect(await dbQuery(page, 'bill', 'count', { where: { patientId: order.patientId } })).toBe(1);
+  });
+
   test('reports: approved reports keep the lab details they were approved with; new reports get the new ones', async () => {
     const reportOf = async (patientName: string) => {
       const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: patientName } }, orderBy: { id: 'desc' }, include: { report: true } });
