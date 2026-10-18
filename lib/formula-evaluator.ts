@@ -153,7 +153,7 @@ export function evaluateTestFormulas(
       }
     }
   } 
-  else if (testCode === 'BIO002') { // Renal Function Test (RFT/KFT)
+  else if (testCode === 'BIO002' || testCode === 'BIO079') { // Renal Function Test (RFT) / Kidney Function Test (KFT)
     const bunId = nameToId['Blood Urea Nitrogen (BUN)'];
     const bloodUreaId = nameToId['Blood Urea'];
     const creatinineId = nameToId['Serum Creatinine'];
@@ -337,7 +337,7 @@ export function isCalculated(
   if (testCode === 'BIO001') {
     return ['Indirect Bilirubin', 'Globulin', 'Albumin/Globulin Ratio (A:G Ratio)'].includes(paramName);
   }
-  if (testCode === 'BIO002') {
+  if (testCode === 'BIO002' || testCode === 'BIO079') {
     return ['Blood Urea', 'BUN / Creatinine Ratio', 'Urea / Creatinine Ratio', 'eGFR (Estimated GFR)'].includes(paramName);
   }
   if (testCode === 'BIO003') {

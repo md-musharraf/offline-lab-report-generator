@@ -1390,6 +1390,7 @@ function QuickRegisterContent() {
                       { label: 'CBC', code: 'HEM001' },
                       { label: 'LFT', code: 'BIO001' },
                       { label: 'RFT', code: 'BIO002' },
+                      { label: 'KFT', code: 'BIO079' },
                       { label: 'Lipid', code: 'BIO003' },
                       { label: 'Thyroid', code: 'BIO004' },
                       { label: 'Sugar Fasting', code: 'BIO005' },

@@ -174,6 +174,32 @@ test.describe.serial('a lab day on a fresh install', () => {
     expect(row.value).toBe('03');
   });
 
+  test('KFT: RFT without electrolytes, Blood Urea and eGFR still calculate themselves', async () => {
+    await go(page, '/dashboard');
+    await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+    await page.keyboard.press('F2');
+    await page.getByPlaceholder('Enter full name').fill('Sunil Hembrom');
+    await page.getByPlaceholder('10-digit number').fill('9876500003');
+    await page.getByPlaceholder('Age').fill('50');
+    await expect(page.getByRole('button', { name: 'RFT', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'KFT', exact: true }).click();
+    await page.getByRole('button', { name: 'Register & Enter Results' }).click();
+    const row = (name: string) => page.locator('div.border-b', { has: page.getByText(name, { exact: true }) }).last().getByPlaceholder('Enter result value');
+    await row('Blood Urea Nitrogen (BUN)').fill('14');
+    await row('Serum Creatinine').fill('1.0');
+    await expect(row('Blood Urea')).toHaveValue('30.0'); // 14 x 2.14
+    await expect(row('eGFR (Estimated GFR)')).not.toHaveValue('');
+    await expect(page.getByText('Sodium', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Save Results & Generate Report' }).click();
+    await expect(page.getByText(/registered successfully under order ID/)).toBeVisible();
+
+    const order = await dbQuery(page, 'testOrder', 'findFirst', { where: { patient: { name: 'Sunil Hembrom' } }, include: { report: true } });
+    const kft = JSON.parse(order.report.snapshot).tests[0];
+    expect(kft.name).toBe('Kidney Function Test');
+    expect(kft.rows.map((r: any) => r.name)).not.toContain('Potassium');
+    expect(kft.rows.find((r: any) => r.name === 'Blood Urea').value).toBe('30.0');
+  });
+
   test('Ctrl+K finds the patient and opens their record', async () => {
     await page.keyboard.press('Control+K');
     await page.getByRole('combobox').fill('Rajesh');

@@ -90,6 +90,43 @@ for (const file of fs.readdirSync(schemas).filter(f => f.endsWith('.sql'))) {
   });
 }
 
+test('a lab updating to 1.10.0 gets KFT once: a copy of its own RFT without Sodium, Potassium and Chloride', async () => {
+  const dataDir = path.join(tmp, 'kft');
+  fs.mkdirSync(dataDir);
+  const db = open(path.join(dataDir, 'dev.db'));
+  await api.ensureSchema(db, sql);
+  await db.$executeRawUnsafe('PRAGMA user_version = 10901'); // last used by v1.9.1
+  const cat = await db.testCategory.create({ data: { name: 'Biochemistry' } });
+  const p = (name, sortOrder, extra = {}) => ({ name, sortOrder, unit: 'mg/dL', ...extra });
+  await db.test.create({
+    data: {
+      code: 'BIO002', name: 'Renal Function Test', shortName: 'RFT', categoryId: cat.id, price: 720, duration: 4, sampleType: 'Serum',
+      parameters: {
+        create: [
+          p('Blood Urea Nitrogen (BUN)', 1, { shortName: 'BUN', refRanges: { create: [{ normalMin: 7, normalMax: 21 }] } }),
+          p('Blood Urea', 2), p('Serum Creatinine', 3), p('Sodium (Na+)', 4), p('Potassium (K+)', 5), p('Chloride (Cl-)', 6),
+          p('eGFR (Estimated GFR)', 7, { refRanges: { create: [{ gender: 'MALE', normalMin: 90 }, { gender: 'FEMALE', normalMin: 85 }] } }),
+        ],
+      },
+    },
+  });
+  const include = { parameters: { include: { refRanges: true }, orderBy: { sortOrder: 'asc' } } };
+
+  await api.upgradeDatabase(db, sql, { dataDir, version: '1.10.0' });
+  const kft = await db.test.findUnique({ where: { code: 'BIO079' }, include });
+  assert.deepEqual([kft.name, kft.shortName, kft.price, kft.duration, kft.sampleType, kft.categoryId], ['Kidney Function Test', 'KFT', 720, 4, 'Serum', cat.id]);
+  assert.deepEqual(kft.parameters.map(x => `${x.sortOrder}.${x.name}`), ['1.Blood Urea Nitrogen (BUN)', '2.Blood Urea', '3.Serum Creatinine', '4.eGFR (Estimated GFR)']);
+  assert.deepEqual([kft.parameters[0].shortName, kft.parameters[0].refRanges[0].normalMax], ['BUN', 21], 'analyzer code and ranges copied');
+  assert.equal(kft.parameters[3].refRanges.length, 2);
+  assert.equal((await db.test.findUnique({ where: { code: 'BIO002' }, include })).parameters.length, 7, 'RFT keeps its electrolytes');
+
+  await db.referenceRange.deleteMany({ where: { parameter: { testId: kft.id } } });
+  await db.testParameter.deleteMany({ where: { testId: kft.id } });
+  await db.test.delete({ where: { id: kft.id } });
+  await api.upgradeDatabase(db, sql, { dataDir, version: '1.10.1' });
+  assert.equal(await db.test.count({ where: { code: 'BIO079' } }), 0, 'a lab that deleted KFT does not get it back');
+});
+
 test('a missing database comes back from the newest backup or an older install, never as an empty lab', () => {
   const root = path.join(tmp, 'recover');
   const dataDir = path.join(root, 'jharlab');

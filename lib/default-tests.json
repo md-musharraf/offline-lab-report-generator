@@ -1602,6 +1602,145 @@
   ]
  },
  {
+  "code": "BIO079",
+  "name": "Kidney Function Test",
+  "shortName": "KFT",
+  "category": "Biochemistry",
+  "price": 650,
+  "duration": 4,
+  "sampleType": "Serum",
+  "container": "SST Tube (Yellow)",
+  "parameters": [
+   {
+    "name": "Blood Urea Nitrogen (BUN)",
+    "unit": "mg/dL",
+    "sortOrder": 1,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 6,
+      "normalMax": 20
+     }
+    ]
+   },
+   {
+    "name": "Blood Urea",
+    "unit": "mg/dL",
+    "sortOrder": 2,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 15,
+      "normalMax": 40
+     }
+    ]
+   },
+   {
+    "name": "Serum Creatinine",
+    "unit": "mg/dL",
+    "sortOrder": 3,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": "MALE",
+      "normalMin": 0.7,
+      "normalMax": 1.3
+     },
+     {
+      "gender": "FEMALE",
+      "normalMin": 0.6,
+      "normalMax": 1.1
+     }
+    ]
+   },
+   {
+    "name": "Uric Acid",
+    "unit": "mg/dL",
+    "sortOrder": 4,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": "MALE",
+      "normalMin": 3.5,
+      "normalMax": 7.2
+     },
+     {
+      "gender": "FEMALE",
+      "normalMin": 2.6,
+      "normalMax": 6
+     }
+    ]
+   },
+   {
+    "name": "BUN / Creatinine Ratio",
+    "unit": "",
+    "sortOrder": 5,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 10,
+      "normalMax": 20
+     }
+    ]
+   },
+   {
+    "name": "Urea / Creatinine Ratio",
+    "unit": "",
+    "sortOrder": 6,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 20,
+      "normalMax": 30
+     }
+    ]
+   },
+   {
+    "name": "Calcium, Total",
+    "unit": "mg/dL",
+    "sortOrder": 7,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 8.8,
+      "normalMax": 10.2
+     }
+    ]
+   },
+   {
+    "name": "Phosphorus",
+    "unit": "mg/dL",
+    "sortOrder": 8,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 2.5,
+      "normalMax": 4.5
+     }
+    ]
+   },
+   {
+    "name": "eGFR (Estimated GFR)",
+    "unit": "mL/min/1.73m²",
+    "sortOrder": 9,
+    "type": "NUMERIC",
+    "refRanges": [
+     {
+      "gender": null,
+      "normalMin": 90,
+      "normalMax": 150
+     }
+    ]
+   }
+  ]
+ },
+ {
   "code": "BIO003",
   "name": "Lipid Profile",
   "shortName": "LIPID",
