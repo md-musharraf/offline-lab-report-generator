@@ -1653,13 +1653,19 @@ function QuickRegisterContent() {
               {/* Dynamic parameters inputs sorted by test items */}
               <div className="space-y-6">
                 {createdOrder.items.map((item: any) => (
-                  <div key={item.id} className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
+                  <div key={item.id} className="rounded-xl border bg-card p-4 shadow-sm space-y-2">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground border-b pb-2 flex items-center gap-2">
                       <Activity className="h-4.5 w-4.5 text-blue-500" />
                       {item.test.name} ({item.test.shortName})
                     </h3>
 
-                    <div className="space-y-3">
+                    <div className="hidden md:flex gap-x-4 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                      <span className="w-1/3">Parameter</span>
+                      <span className="w-1/4">Ref Range</span>
+                      <div className="flex-1 flex gap-3"><span className="flex-1">Result</span><span className="w-28 text-center">Flag</span></div>
+                    </div>
+
+                    <div>
                       {(() => {
                         const rawParamIds = item.selectedParameters && item.selectedParameters.trim() !== ''
                           ? item.selectedParameters.split(',').map(Number).filter((n: number) => !isNaN(n) && n > 0)
@@ -1679,7 +1685,7 @@ function QuickRegisterContent() {
                         return filteredParams.map((param: any) => {
                           if (param.isHeader) {
                             return (
-                              <div key={param.id} className="bg-muted/40 px-3 py-1 rounded text-xs font-bold text-foreground tracking-wider uppercase">
+                              <div key={param.id} className="bg-muted/40 px-3 py-1 my-1 rounded text-xs font-bold text-foreground tracking-wider uppercase">
                                 {param.name}
                               </div>
                             );
@@ -1709,18 +1715,15 @@ function QuickRegisterContent() {
                           return (
                             <div 
                               key={param.id} 
-                              className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/40 pb-3 last:border-0 last:pb-0"
+                              className="flex flex-col md:flex-row md:items-center justify-between gap-x-4 gap-y-1 border-b border-border/40 py-1.5 last:border-0"
                             >
-                              <div className="w-full md:w-1/3">
+                              <div className="w-full md:w-1/3 flex items-baseline gap-1.5">
                                 <p className="text-xs font-bold text-foreground">{param.name}</p>
-                                {param.unit && <span className="text-[11px] text-muted-foreground">Unit: {param.unit}</span>}
+                                {param.unit && <span className="text-[11px] text-muted-foreground">{param.unit}</span>}
                               </div>
 
                               {/* Reference Range */}
-                              <div className="w-full md:w-1/4 text-left">
-                                <span className="text-[11px] text-muted-foreground uppercase font-bold tracking-wider">Ref Range</span>
-                                <p className="text-xs text-muted-foreground/80 font-mono mt-0.5">{rangeStr || 'N/A'}</p>
-                              </div>
+                              <p className="w-full md:w-1/4 text-xs text-muted-foreground/80 font-mono">{rangeStr || 'N/A'}</p>
 
                               {/* Input value & dynamically updated flags */}
                               <div className="flex-1 flex items-center gap-3">
@@ -1748,7 +1751,7 @@ function QuickRegisterContent() {
                                       <select
                                         value={resultState.value}
                                         onChange={(e) => handleResultValChange(param, e.target.value)}
-                                        className={`w-full px-3 py-1.5 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${inputBorderClass}`}
+                                        className={`w-full h-9 !min-h-0 px-3 py-1 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${inputBorderClass}`}
                                       >
                                         <option value="" className="bg-card text-foreground">Select...</option>
                                         {param.options?.split(',').map((opt: string) => (
@@ -1766,7 +1769,7 @@ function QuickRegisterContent() {
                                           value={resultState.value}
                                           onChange={(e) => handleResultValChange(param, e.target.value)}
                                           onBlur={(e) => { const v = padValue(e.target.value, param.padDigits); if (!e.target.readOnly && v !== e.target.value) handleResultValChange(param, v); }}
-                                          className={`w-full px-3 py-1.5 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${isParamCalc ? 'pr-14' : ''} ${inputBorderClass}`}
+                                          className={`w-full h-9 !min-h-0 px-3 py-1 rounded-xl border bg-background text-sm font-semibold focus:outline-none transition-all ${isParamCalc ? 'pr-14' : ''} ${inputBorderClass}`}
                                         />
                                         {isParamCalc && (
                                           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 select-none">

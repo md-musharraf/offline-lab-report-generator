@@ -100,11 +100,24 @@ export function useEnterAsTab() {
       }
     }
 
+    // focus() only scrolls a field to the screen's bottom edge, hiding the fields after it
+    // (e.g. the next result parameters). Centre a field that lands in the bottom 30%.
+    // :focus-visible skips mouse-opened dropdowns; date/time pickers would detach from a moving field.
+    function handleFocusIn(e: FocusEvent) {
+      const el = e.target as HTMLElement;
+      if (!el.matches?.('input:not([type="date"]):not([type="time"]), select, textarea') || !el.matches(':focus-visible')) return;
+      requestAnimationFrame(() => {
+        if (el.getBoundingClientRect().bottom > window.innerHeight * 0.7) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    }
+
     // Attach at the document level using capture phase for reliability
     document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('focusin', handleFocusIn);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('focusin', handleFocusIn);
     };
   }, []);
 }
